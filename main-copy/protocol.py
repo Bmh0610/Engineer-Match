@@ -1,0 +1,134 @@
+"""上位机 ↔ STM32 串口协议(12 字节定长帧, 电控 2026-10 约束)。
+
+帧: FF | MODE u16 | X i16 | Y i16 | Z i16 | CRC16 | FE
+大端; CRC16-Modbus 覆盖 MODE~Z 共 8 字节。
+坐标系约定(与电控逐条对过):
+  0x0001 move_v 底盘: 车体系相对位移, 原点=车体中心、初始 0;
+      +x = 机械臂一侧(右), +y = 车头, z = 旋转角°(顺时针/右转为负, 逆时针为正
+      —— 2026-10-20 实车确认, 最初"+朝臂侧即右转"的说法反了); 单位 mm/°
+  0x0002 move_a 机械臂: X = 伸出距离 mm, Y = 离地高度 mm, Z = 回转角度°
+      (顺时针/往车尾为负, 逆时针/往车头为正)
+  0x0003 夹爪: X = 角度(分度 0.1°), Y = 执行时间 ms
+      闭合 (1300, 500), 张开 (800, 500) —— 数值在 config.GRIP_CLOSE/GRIP_OPEN
+上行: 0x0011 底盘完成 | 0x0012 机械臂完成 | 0x0013 夹爪完成 | 0x0020 一键启动
+分立完成码区分谁完成, 不带失败码, 数据字段为 0。
+超时策略: 单命令在途(全流程同时只有一条未决命令), 单窗口 35s 静默即抛错
+不重发 —— 下位机无同帧去重, 重发会双走。
+"""
+import struct
+import time
+
+import serial
+
+FRAME_LEN = 12
+_FMT = ">Hhhh"   # mode x y z
+
+
+class Mode:
+    MOVE_V = 0x0001        # 底盘: 车体系相对位移 (x 右, y 前, z 右转°)
+    MOVE_A = 0x0002        # 机械臂: (伸出距离, 离地高度, 回转角°)
+    GRIPPER = 0x0003       # 夹爪: (角度 0.1°, 执行时间 ms)
+    ACK_CHASSIS = 0x0011   # 底盘完成
+    ACK_ARM = 0x0012       # 机械臂完成
+    ACK_GRIPPER = 0x0013   # 夹爪完成
+    BUTTON_START = 0x0020  # 一键启动按键
+
+
+class LinkError(RuntimeError):
+    pass
+
+
+def crc16(data: bytes) -> int:
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
+
+
+def frame(mode: int, x=0, y=0, z=0) -> bytes:
+    body = struct.pack(_FMT, mode, int(x), int(y), int(z))
+    return b"\xFF" + body + struct.pack(">H", crc16(body)) + b"\xFE"
+
+
+class Frame:
+    def __init__(self, buf: bytes):
+        self.mode, self.x, self.y, self.z = struct.unpack(_FMT, buf[1:9])
+
+    def __repr__(self):
+        return f"Frame(0x{self.mode:04X}, {self.x}, {self.y}, {self.z})"
+
+
+def decode(buf: bytearray):
+    """定长剥帧: 找 FF → 凑 12 字节 → 验 FE → 验 CRC。
+    半帧保留返回 None; 坏帧丢弃继续找, 找不到返回 None。"""
+    while True:
+        start = buf.find(b"\xFF")
+        if start < 0:
+            buf.clear()
+            return None
+        if start > 0:
+            del buf[:start]
+        if len(buf) < FRAME_LEN:
+            return None
+        if (buf[FRAME_LEN - 1] == 0xFE
+                and struct.unpack_from(">H", buf, 9)[0] == crc16(buf[1:9])):
+            f = Frame(bytes(buf[:FRAME_LEN]))
+            del buf[:FRAME_LEN]
+            return f
+        del buf[:1]   # 伪帧头或坏帧, 从下一字节重找
+
+
+class Link:
+    def __init__(self, port: str, baudrate: int = 115200):
+        self.ser = serial.Serial(port, baudrate, timeout=0.05)
+        self._rx = bytearray()
+
+    # ---- 下行 ----
+
+    def move_v(self, dx: float, dy: float, dz: float = 0.0):
+        """底盘车体系相对位移: dx 右, dy 前, dz 旋转°(顺时针/右转为负)。"""
+        self.ser.write(frame(Mode.MOVE_V, round(dx), round(dy), round(dz)))
+
+    def move_a(self, reach: float, height: float, theta: float = 0.0):
+        """机械臂: 伸出距离 mm, 离地高度 mm, 回转角°(逆时针/朝车头+)。"""
+        self.ser.write(frame(Mode.MOVE_A, round(reach), round(height), round(theta)))
+
+    def gripper(self, angle_01deg: int, time_ms: int):
+        """夹爪: 角度(0.1° 分度, 如 1300=130.0°), 执行时间 ms。"""
+        self.ser.write(frame(Mode.GRIPPER, angle_01deg, time_ms))
+
+    # ---- 上行 ----
+
+    def poll(self) -> list:
+        self._rx.extend(self.ser.read(256))
+        frames = []
+        while True:
+            f = decode(self._rx)
+            if f is None:
+                return frames
+            frames.append(f)
+
+    # ---- 单命令在途 ----
+
+    def flush(self):
+        """清残留回执, 防上一条的迟到完成码冒充本条结果。"""
+        while self.poll():
+            pass
+
+    def send_and_wait(self, send, ack_mode: int, timeout: float = 35.0,
+                      label: str = "") -> Frame:
+        """发一条命令并等它的完成码。单窗口超时抛错不重发(重发会双走)。
+        靠"同一时刻只有一条未决命令"的纪律保证完成码不会张冠李戴。"""
+        self.flush()
+        send()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            for f in self.poll():
+                if f.mode == ack_mode:
+                    return f
+            time.sleep(0.03)
+        raise LinkError(
+            f"{label or hex(ack_mode)} {timeout:.0f}s 无完成回执: "
+            f"帧未达或回执被干扰; 不重发(下位机无同帧去重), 重摆重跑")

@@ -1,0 +1,33 @@
+scp -r "/home/popcorn/桌面/Engineer Match Information/main" ubuntu@10.92.10.218:/home/ubuntu/Desktop/    ###@后面是地址，需要改
+ip a看
+
+Nano Pin 8 TX → 设备 RX
+Nano Pin 10 RX → 设备 TX
+Nano Pin 9 GND → 设备 GND
+
+监听
+python3 -c "
+import serial, time
+s = serial.Serial('/dev/ttyTHS1', 115200, timeout=0.1)
+print('监听 /dev/ttyTHS1, 现在从电脑端发数据... Ctrl-C 停')
+buf = b''
+try:
+    while True:
+        d = s.read(256)
+        if d:
+            buf += d
+            print(time.strftime('%H:%M:%S'), repr(d), d.hex(' '))
+except KeyboardInterrupt:
+    pass
+print('共收到', len(buf), '字节')"
+
+发送
+ python3 -c "
+import serial, time
+s = serial.Serial('/dev/ttyTHS1', 115200, timeout=0.1)
+while True:
+    s.write(b'111 ')
+    time.sleep(0.5)"
+
+打开SSCOM
+cd ~/sscom && ./sscom
