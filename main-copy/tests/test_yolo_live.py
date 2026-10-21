@@ -67,8 +67,8 @@ def to_body_str(m):
     return f"X右{dy_right:+.1f} Y前{dx_fwd:+.1f}mm"
 
 
-def render(frame, mats, nearest_m, undistort_view=False):
-    """检测结果叠加到帧副本(主画面)。"""
+def render(frame, mats, nearest_m, undistort_view=False, tracker_on=False):
+    """检测结果叠加到帧副本(主画面)。tracker_on 时未确认=虚线+[new]、保持中=[hold]。"""
     c = finder._CALIB
     if undistort_view and c is not None:
         disp = cv2.undistort(frame, c._K, c.dist)
@@ -103,7 +103,8 @@ def render(frame, mats, nearest_m, undistort_view=False):
             xs = [p[0] for p in corners]
             ys = [p[1] for p in corners]
             bx1, by1, bx2, by2 = int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
-        if m.conf >= C.CONFIRM_CONF:
+        solid = m.conf >= C.CONFIRM_CONF and not (tracker_on and not m.confirmed)
+        if solid:
             cv2.rectangle(disp, (bx1, by1), (bx2, by2), color,
                           3 if m is nearest_m else 2)
         else:
@@ -117,14 +118,16 @@ def render(frame, mats, nearest_m, undistort_view=False):
         dy_right = m.dx_mm * C.IMG2BODY[0]
         dx_fwd = m.dy_mm * C.IMG2BODY[1]
         # 画面标注 ASCII: X=车系x(右,臂侧) Y=车系y(前,车头) = move_v 参数口径
+        status = (" [hold]" if m.holding else
+                  " [new]" if tracker_on and not m.confirmed else "")
         label = (f"{m.color} {m.conf:.2f} | X{dy_right:+.1f} Y{dx_fwd:+.1f}mm "
                  f"(px {m.dx:+.0f},{m.dy:+.0f})"
                  + (" [near]" if m is nearest_m else "")
-                 + (" H" if m.hough is not None else ""))
+                 + (" H" if m.hough is not None else "") + status)
         cv2.putText(disp, label, (bx1, max(14, by1 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     tag = "UNDISTORTED VIEW (u 切回原图)" if undistort_view else \
-          "RAW (space=定格  u=去畸变  h=霍夫  q=退出)"
+          "RAW (space=定格  u=去畸变  h=霍夫  p=后处理  q=退出)"
     cv2.putText(disp, tag, (10, 700), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                 (255, 255, 255), 1)
     return disp
@@ -211,7 +214,8 @@ def main():
           "蓝十字=画面中心 | 橙框=抓取窗 | 白圈=霍夫圆")
     print("按键: 空格=定格(冻结帧上调参) | w/s=param2±5  a/d=param1±10 | "
           "1/2=r下限  3/4=r上限±0.05 | t=整体/顶面半径组  c=候选策略 | "
-          "点击物料框=面板跟踪它 | u=去畸变预览 h=霍夫开关 q=退出")
+          "p=跨帧后处理(消歧/确认/低通/保持) | 点击物料框=面板跟踪它 | "
+          "u=去畸变预览 h=霍夫开关 q=退出")
 
     # 会话状态
     frozen = None          # None=实时; 否则定格帧
@@ -221,6 +225,8 @@ def main():
     pick = "nearest"       # 多候选选择: nearest=离框心最近 / min_r=半径最小优先
     undistort_view = False
     hough_on = not args.no_hough
+    tracker = finder.MaterialTracker()   # 跨帧后处理(消歧+确认+低通+保持)
+    tracker_on = True
     last_stages, last_hit = None, False
     last_log = 0.0
 
@@ -240,6 +246,8 @@ def main():
             click_pt = nonlocal_click.pop()
         mats = finder.find_materials(backend, frame, conf=args.conf,
                                      px_per_mm=C.PX_PER_MM)
+        if tracker_on:
+            mats = finder.disambiguate_pairs(mats)   # 易混对消歧(霍夫前做)
         target = _pick(mats, click_pt) or finder.nearest(mats)
         if hough_on:
             for m in mats:
@@ -251,19 +259,25 @@ def main():
                     finder.refine_material(frame, m, px_per_mm=C.PX_PER_MM)
         else:
             last_stages = None
-        nearest_m = finder.nearest(mats)
-        cv2.imshow("yolo_live", render(frame, mats, nearest_m, undistort_view))
+        if tracker_on:
+            display_mats = tracker.update(mats, frame.shape, C.PX_PER_MM)
+        else:
+            display_mats = mats
+        nearest_m = finder.nearest(display_mats)
+        cv2.imshow("yolo_live", render(frame, display_mats, nearest_m,
+                                       undistort_view, tracker_on))
         if hough_on and last_stages is not None:
             cv2.imshow("hough_pipeline", render_panel(last_stages, last_hit,
                                                       param1, param2, r_lo, r_hi,
                                                       pick))
         now = time.time()
-        if mats and now - last_log > 0.5:
+        if display_mats and now - last_log > 0.5:
             last_log = now
             parts = [f"{'*' if m is nearest_m else ''}{m.color}"
                      f"({m.conf:.2f}, {to_body_str(m)}, px {m.dx:+.0f},{m.dy:+.0f})"
                      f"{' H' if m.hough is not None else ' bbox'}"
-                     for m in mats]
+                     f"{' [hold]' if m.holding else ' [new]' if not m.confirmed else ''}"
+                     for m in display_mats]
             tag = "[定格] " if frozen is not None else ""
             print(tag + "检出: " + "  ".join(parts))
 
@@ -317,6 +331,10 @@ def main():
                 r_lo, r_hi = finder.CAP_R_LO, finder.CAP_R_HI
                 mode = "顶面小圆"
             print(f"半径组[{mode}]: r=[{r_lo:.2f},{r_hi:.2f}]")
+        elif k == ord("p"):
+            tracker_on = not tracker_on
+            tracker.reset()
+            print(f"跨帧后处理(消歧+确认+低通+保持): {'开' if tracker_on else '关'}")
         elif k == ord("q"):
             break
     cam.close()

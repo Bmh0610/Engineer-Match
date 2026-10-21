@@ -41,6 +41,14 @@ FRAME_GAP = 0.05         # 采帧间隔 > 帧周期, 保证不是同一帧
 WAIT_COLOR_TIMEOUT = 30.0   # 单色等待超时(含换料等待), 超时跳过该色
 ADJUST_ON_GRAB = True    # 出手前对该物料做一次 move_v 微调(死区内自动跳过)
 
+# ---- 跨帧后处理(移植沈航 common.py 思路: 确认→滤波→保持→消歧) ----
+TRACK_CONFIRM_FRAMES = 3   # 连续 N 帧命中才确认(confirmed)
+TRACK_MATCH_PX = 30        # 帧间圆心位置关联阈值(px)
+TRACK_ALPHA = 0.6          # 低通系数: 圆心 = α·新帧 + (1-α)·旧(越大越跟手, 越小越稳)
+TRACK_HOLD_FRAMES = 3      # 漏检保持帧数: 期间继续输出上次圆心, 超时删 Track
+DISAMBIG_COVER = 0.55      # 易混对消歧覆盖率门槛(交面积/小框面积)
+RISKY_PAIRS = [("blue", "light_blue"), ("green", "yellow")]   # 易混对(实测混淆对)
+
 # ---- 物料(10 类模型里的物料子集, 类别号见 detect.py) ----
 CLS2COLOR = {1: "red", 2: "green", 3: "blue",
              4: "yellow", 5: "light_blue", 6: "black"}

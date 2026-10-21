@@ -6,6 +6,7 @@
 观察位/中心位同高只需一套, 高度若不同再拆分)。
 守株待兔等的是"转盘停歇": 转盘每转有停留, 物料静止且连帧同色才出手。
 """
+import math
 import time
 from dataclasses import dataclass
 
@@ -29,6 +30,8 @@ class Material:
     dx_mm: float          # 像素偏差换算 mm
     dy_mm: float
     hough: tuple = None   # 霍夫精化命中时的 (cx, cy, r) 原图像素; None=未命中/未启用
+    confirmed: bool = False   # 跨帧后处理: 连续 N 帧确认通过
+    holding: bool = False     # 跨帧后处理: 漏检保持中(输出上次圆心)
 
 
 _PX_WARNED = False
@@ -265,3 +268,108 @@ def wait_for_color(backend, cam, color, px_per_mm=None, timeout=None,
                     return m2, f
         time.sleep(C.FRAME_GAP)
     return None, None
+
+
+# ---- 跨帧后处理(移植沈航 common.py 思路): 消歧 → 关联 → 确认 → 低通 → 保持 ----
+
+# 易混对裁决赢家: blue/light_blue 按沈航实测经验归 light_blue(更特殊类);
+# 不在表中的易混对归 conf 高者(保守)。键 = frozenset(色对)。
+_PAIR_WINNER = {frozenset(("blue", "light_blue")): "light_blue"}
+
+
+def _cover_ratio(box_a, box_b):
+    """B 框被 A 框覆盖的比例 = 交面积 / B 面积。"""
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+    iw = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+    ih = max(0.0, min(ay2, by2) - max(ay1, by1))
+    area_b = max((bx2 - bx1) * (by2 - by1), 1e-6)
+    return iw * ih / area_b
+
+
+def disambiguate_pairs(mats, cover=None):
+    """易混对覆盖率消歧(返回新列表): RISKY_PAIRS 两色框互相覆盖≥门槛判同一
+    物体双检, 保留赢家(light_blue 优先 / 其余对 conf 高者), 删另一个。"""
+    cover = C.DISAMBIG_COVER if cover is None else cover
+    pairs = [frozenset(p) for p in C.RISKY_PAIRS]
+    out = list(mats)
+    i = 0
+    while i < len(out):
+        j = i + 1
+        while j < len(out):
+            a, b = out[i], out[j]
+            if frozenset((a.color, b.color)) in pairs and \
+                    max(_cover_ratio(a.box, b.box),
+                        _cover_ratio(b.box, a.box)) >= cover:
+                winner_color = _PAIR_WINNER.get(frozenset((a.color, b.color)))
+                keep = (a if a.color == winner_color else b) \
+                    if winner_color else (a if a.conf >= b.conf else b)
+                out.remove(b if keep is a else a)
+                continue   # 不前移, 重新比较保留者与下一个
+            j += 1
+        i += 1
+    return out
+
+
+class MaterialTracker:
+    """YOLO 检测结果的跨帧后处理: 关联 → 确认 → 低通 → 漏检保持。
+
+    update(mats, frame_shape, px_per_mm) 每帧调用, 返回稳定物料列表
+    (Material 子集, 带 confirmed/holding 标记):
+      关联: 与已有 Track 贪心近邻(圆心距 < TRACK_MATCH_PX, 同色);
+      确认: 连续 TRACK_CONFIRM_FRAMES 帧命中才 confirmed;
+      低通: 圆心 = α·新帧 + (1-α)·旧(只平滑位置, 出手定位够稳且滞后小);
+      保持: 确认过的 Track 漏检 ≤ TRACK_HOLD_FRAMES 帧时继续输出上次圆心
+            (holding=True, 防转盘短暂遮挡误判消失), 超时删除。
+    """
+
+    def __init__(self):
+        self.tracks = []   # dict: color/cx/cy/conf/box/hough/hits/missed/...
+
+    def reset(self):
+        self.tracks = []
+
+    def update(self, mats, frame_shape, px_per_mm=None):
+        px_per_mm = _warn_px_ratio(px_per_mm)
+        h, w = frame_shape[:2]
+        cx0, cy0 = (_CALIB.principal_point(w, h) if _CALIB else (w / 2, h / 2))
+        unmatched = list(self.tracks)
+        for m in mats:
+            best, bd = None, C.TRACK_MATCH_PX
+            for t in unmatched:
+                if t["color"] != m.color:
+                    continue
+                d = math.hypot(m.cx - t["cx"], m.cy - t["cy"])
+                if d < bd:
+                    best, bd = t, d
+            if best is not None:
+                a = C.TRACK_ALPHA
+                best["cx"] = a * m.cx + (1 - a) * best["cx"]
+                best["cy"] = a * m.cy + (1 - a) * best["cy"]
+                best["conf"], best["box"], best["hough"] = m.conf, m.box, m.hough
+                best["hits"] += 1
+                best["missed"] = 0
+                best["confirmed"] = best["hits"] >= C.TRACK_CONFIRM_FRAMES
+                best["holding"] = False
+                unmatched.remove(best)
+            else:
+                self.tracks.append(dict(color=m.color, cx=m.cx, cy=m.cy,
+                                        conf=m.conf, box=m.box, hough=m.hough,
+                                        hits=1, missed=0, confirmed=False,
+                                        holding=False))
+        for t in unmatched:
+            t["missed"] += 1
+            if t["missed"] > C.TRACK_HOLD_FRAMES:
+                self.tracks.remove(t)
+            else:
+                t["holding"] = t["confirmed"]
+        out = []
+        for t in self.tracks:
+            if not (t["confirmed"] or t["holding"]):
+                continue
+            dx, dy = t["cx"] - cx0, t["cy"] - cy0
+            out.append(Material(t["color"], t["conf"], t["box"], t["cx"], t["cy"],
+                                dx, dy, dx / px_per_mm, dy / px_per_mm,
+                                hough=t["hough"], confirmed=t["confirmed"],
+                                holding=t["holding"]))
+        return out
