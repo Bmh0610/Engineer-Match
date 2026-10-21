@@ -147,7 +147,7 @@ def _cell(img, label, size=CELL):
     return c
 
 
-def render_panel(stages, hit, param1, param2, r_lo, r_hi):
+def render_panel(stages, hit, param1, param2, r_lo, r_hi, pick):
     """霍夫流水线六格面板: ROI/灰度/模糊/二值化/Canny/霍夫结果。"""
     roi = stages.get("roi")
     cands = stages.get("candidates")
@@ -161,8 +161,8 @@ def render_panel(stages, hit, param1, param2, r_lo, r_hi):
             cv2.drawMarker(res, (int(best[0]), int(best[1])), (0, 0, 255),
                            cv2.MARKER_CROSS, 14, 1)
     n_cand = 0 if cands is None else len(cands)
-    info = (f"p1={param1} p2={param2} r=[{r_lo:.2f},{r_hi:.2f}] "
-            f"cands={n_cand} hit={'Y' if hit else 'N'} | w/s:p2  a/d:p1")
+    info = (f"p1={param1} p2={param2} r=[{r_lo:.2f},{r_hi:.2f}] pick={pick} "
+            f"cands={n_cand} hit={'Y' if hit else 'N'} | 1-4:r  c:pick")
     top = np.full((26, CELL * 3, 3), 30, np.uint8)
     cv2.putText(top, info, (8, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                 (0, 255, 255), 1)
@@ -210,6 +210,7 @@ def main():
     print("yolo_live 窗口: 实线=过颜色确认 虚线=不过 | 加粗=离车最近 | 绿十字=主点 "
           "蓝十字=画面中心 | 橙框=抓取窗 | 白圈=霍夫圆")
     print("按键: 空格=定格(冻结帧上调参) | w/s=param2±5  a/d=param1±10 | "
+          "1/2=r下限  3/4=r上限±0.05 | t=整体/顶面半径组  c=候选策略 | "
           "点击物料框=面板跟踪它 | u=去畸变预览 h=霍夫开关 q=退出")
 
     # 会话状态
@@ -217,6 +218,7 @@ def main():
     click_pt = None        # 点击选中的画面坐标(定格/实时均可点)
     param1, param2 = finder.HOUGH_PARAM1, finder.HOUGH_PARAM2
     r_lo, r_hi = finder.HOUGH_R_LO, finder.HOUGH_R_HI
+    pick = "nearest"       # 多候选选择: nearest=离框心最近 / min_r=半径最小优先
     undistort_view = False
     hough_on = not args.no_hough
     last_stages, last_hit = None, False
@@ -243,7 +245,8 @@ def main():
             for m in mats:
                 if m is target:   # 跟踪物料: 用当前参数并产出中间图
                     last_hit, last_stages = finder.refine_material_stages(
-                        frame, m, C.PX_PER_MM, param1=param1, param2=param2)
+                        frame, m, C.PX_PER_MM, param1=param1, param2=param2,
+                        pick=pick)
                 else:
                     finder.refine_material(frame, m, px_per_mm=C.PX_PER_MM)
         else:
@@ -252,7 +255,8 @@ def main():
         cv2.imshow("yolo_live", render(frame, mats, nearest_m, undistort_view))
         if hough_on and last_stages is not None:
             cv2.imshow("hough_pipeline", render_panel(last_stages, last_hit,
-                                                      param1, param2, r_lo, r_hi))
+                                                      param1, param2, r_lo, r_hi,
+                                                      pick))
         now = time.time()
         if mats and now - last_log > 0.5:
             last_log = now
@@ -268,7 +272,8 @@ def main():
         if k == ord(" "):
             if frozen is None:
                 frozen = frame.copy()
-                print("已定格: w/s 调 param2, a/d 调 param1, 点击选物料; 空格恢复实时")
+                print("已定格: w/s=p2  a/d=p1  1/2/3/4=半径范围  t=顶面组  c=策略, "
+                      "点击选物料; 空格恢复实时")
             else:
                 frozen = None
                 print("恢复实时")
@@ -289,6 +294,29 @@ def main():
         elif k == ord("h"):
             hough_on = not hough_on
             print(f"霍夫圆精化: {'开' if hough_on else '关'}")
+        elif k == ord("1"):
+            r_lo = max(r_lo - 0.05, 0.10)
+            print(f"r=[{r_lo:.2f},{r_hi:.2f}]")
+        elif k == ord("2"):
+            r_lo = min(r_lo + 0.05, r_hi - 0.05)
+            print(f"r=[{r_lo:.2f},{r_hi:.2f}]")
+        elif k == ord("3"):
+            r_hi = max(r_hi - 0.05, r_lo + 0.05)
+            print(f"r=[{r_lo:.2f},{r_hi:.2f}]")
+        elif k == ord("4"):
+            r_hi = min(r_hi + 0.05, 1.35)
+            print(f"r=[{r_lo:.2f},{r_hi:.2f}]")
+        elif k == ord("c"):
+            pick = "min_r" if pick == "nearest" else "nearest"
+            print(f"候选策略: {pick}({'半径最小优先' if pick == 'min_r' else '离框心最近'})")
+        elif k == ord("t"):
+            if (r_lo, r_hi) == (finder.CAP_R_LO, finder.CAP_R_HI):
+                r_lo, r_hi = finder.HOUGH_R_LO, finder.HOUGH_R_HI
+                mode = "整体立体"
+            else:
+                r_lo, r_hi = finder.CAP_R_LO, finder.CAP_R_HI
+                mode = "顶面小圆"
+            print(f"半径组[{mode}]: r=[{r_lo:.2f},{r_hi:.2f}]")
         elif k == ord("q"):
             break
     cam.close()

@@ -62,9 +62,16 @@ HOUGH_R_LO, HOUGH_R_HI = 0.55, 1.35   # 搜索半径 = 估计半径(框短边/2)
 HOUGH_PARAM1 = 120      # Canny 高阈值(霍夫内部边缘检测; 低阈值自动取其一半)
 HOUGH_PARAM2 = 30       # 圆心累加器门槛(检出少/漏检→调低, 误检→调高)
 
+# 顶面模式: 物料上小下大, YOLO 框住整体立体 → 收窄半径范围专找顶面小圆。
+# 顶面/底面直径比约 0.7(实拍估计, 待实测固化) → 顶面半径 ≈ 框短边/2 × 0.35。
+# 注意: HoughCircles 的 minDist(=估计半径)会抑制同心近距双圆——单次调用拿不到
+# "大圆+小圆"两个候选, min_r 策略只在候选同为小圆时起作用。所以整体模式下属
+# 只能靠收窄半径(顶面组)定位顶面; 两阶段霍夫(先大圆再限制 ROI/半径找小圆)是后备。
+CAP_R_LO, CAP_R_HI = 0.25, 0.60
+
 
 def hough_stages(frame, box, pad=None, r_lo=None, r_hi=None,
-                 param1=None, param2=None):
+                 param1=None, param2=None, pick="nearest"):
     """霍夫圆检测全流水线(带中间图): 返回 (命中圆 或 None, stages 字典)。
 
     命中圆 = (cx, cy, r) 原图像素; 检不出返回 (None, stages)。
@@ -72,6 +79,8 @@ def hough_stages(frame, box, pad=None, r_lo=None, r_hi=None,
              best_roi(ROI 坐标命中圆或 None), offset(ROI 原点), params}
     参数缺省时用 HOUGH_* 模块常量(线上默认行为); 测试台调参时显式传值。
     binary 为 Otsu 二值图, 仅供可视化观察物料/背景分离——霍夫输入仍是模糊灰度图。
+    pick: 多候选选择策略——"nearest"=离框心最近(默认), "min_r"=半径最小优先
+    (顶面圆比底面小, 半径最小优先更抗框心偏移)。
     """
     pad = HOUGH_PAD if pad is None else pad
     r_lo = HOUGH_R_LO if r_lo is None else r_lo
@@ -109,8 +118,11 @@ def hough_stages(frame, box, pad=None, r_lo=None, r_hi=None,
         stages["best_roi"] = None
         return None, stages
     bx, by = (x1 + x2) / 2, (y1 + y2) / 2
-    best = min(circles[0], key=lambda c: (c[0] + rx1 - bx) ** 2
-               + (c[1] + ry1 - by) ** 2)
+    if pick == "min_r":
+        best = min(circles[0], key=lambda c: c[2])   # 半径最小优先(顶面圆)
+    else:
+        best = min(circles[0], key=lambda c: (c[0] + rx1 - bx) ** 2
+                   + (c[1] + ry1 - by) ** 2)         # 离框心最近(默认)
     stages["best_roi"] = best
     return (float(best[0] + rx1), float(best[1] + ry1), float(best[2])), stages
 
