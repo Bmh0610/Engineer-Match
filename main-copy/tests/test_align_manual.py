@@ -43,8 +43,7 @@ def one_round(backend, cam, conf, round_no):
         frame_img, obj, C.PX_PER_MM, r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI,
         param2=HOUGH_P2_SOFT)
     src = "霍夫顶面" if hit else "bbox中心(霍夫未命中)"
-    dy_right = obj.dx_mm * C.IMG2BODY[0]
-    dx_fwd = obj.dy_mm * C.IMG2BODY[1]
+    dy_right, dx_fwd = finder.to_body(obj)
     residual = (dy_right ** 2 + dx_fwd ** 2) ** 0.5
     if residual <= C.ALIGN_TOL_MM:
         print(f"[r{round_no}] ✓ 已收敛: X右{dy_right:+.1f} Y前{dx_fwd:+.1f} "

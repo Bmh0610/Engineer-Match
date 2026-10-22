@@ -118,8 +118,7 @@ def render(frame, mats, nearest_m, undistort_view=False, tracker_on=False):
             hx, hy, hr = m.hough
             hxx, hyy = mp(hx, hy)
             cv2.circle(disp, (int(hxx), int(hyy)), max(int(hr), 3), (255, 255, 255), 1)
-        dy_right = m.dx_mm * C.IMG2BODY[0]
-        dx_fwd = m.dy_mm * C.IMG2BODY[1]
+        dy_right, dx_fwd = finder.to_body(m)
         # 画面标注 ASCII: X=车系x(右,臂侧) Y=车系y(前,车头) = move_v 参数口径
         status = (" [hold]" if m.holding else
                   " [new]" if tracker_on and not m.confirmed else "")

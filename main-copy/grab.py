@@ -13,6 +13,7 @@
 抓取微调走底盘 move_v: 臂与车刚性连接, 底盘微调即臂对物料的相对修正,
 且与阶段 A 共用 IMG2BODY 一套轴向参数(臂系微调需另标 reach/theta 轴向, 备选)。
 """
+import cv2
 import math
 import time
 
@@ -48,8 +49,9 @@ class StepGrab:
 
     @staticmethod
     def _to_body(obj):
-        """图像偏差(mm) → 车体系 (前, 右)。符号见 config.IMG2BODY。"""
-        return obj.dy_mm * C.IMG2BODY[1], obj.dx_mm * C.IMG2BODY[0]
+        """图像偏差(mm) → 车体系 (前, 右)。2x2 映射见 finder.to_body。"""
+        dy_right, dx_fwd = finder.to_body(obj)
+        return dx_fwd, dy_right
 
     # ---- 阶段 A: 定位纠偏 ----
 
@@ -58,14 +60,46 @@ class StepGrab:
         return lambda f: finder.nearest(
             finder.find_materials(self.backend, f, conf=0.5, px_per_mm=px))
 
-    def align(self):
-        """看-动-再看, 直到最近物料圆心进死区(gcxl adjust 骨架)。收敛返回 True。"""
+    @staticmethod
+    def _draw_align(frame, obj, residual, round_no, sent=False):
+        """纠偏可视化: 物料框+圆心+霍夫圈+残差(供 align(visualize=True))。"""
+        vis = frame.copy()
+        x1, y1, x2, y2 = map(int, obj.box)
+        cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        cv2.circle(vis, (int(obj.cx), int(obj.cy)), 4, (0, 0, 255), -1)
+        if getattr(obj, "hough", None):
+            hx, hy, hr = obj.hough
+            cv2.circle(vis, (int(hx), int(hy)), max(int(hr), 3), (255, 255, 255), 1)
+        dy_right = obj.dx_mm * C.IMG2BODY[0]
+        dx_fwd = obj.dy_mm * C.IMG2BODY[1]
+        tag = (f"align r{round_no}: X{dy_right:+.1f} Y{dx_fwd:+.1f}mm "
+               f"res={residual:.1f}mm" + (" -> move_v sent" if sent else ""))
+        cv2.putText(vis, tag, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                    (0, 255, 255), 2)
+        return vis
+
+    def align(self, visualize=False):
+        """看-动-再看, 直到最近物料圆心进死区(gcxl adjust 骨架)。收敛返回 True。
+
+        visualize=True: 每轮把检出画面(框/圆心/霍夫圈/残差)显示在 align 窗口
+        ——需要显示环境(Nano 接屏/NoMachine), 无显示时自动降级为纯打印。
+        """
         deadline = time.time() + C.ALIGN_TIMEOUT
         residual = None
+        shown = False
+
+        def show(frame_img, obj, res, i, sent=False):
+            try:
+                cv2.imshow("align", self._draw_align(frame_img, obj, res, i, sent))
+                cv2.waitKey(1)
+                return True
+            except cv2.error:
+                return False
+
         for i in range(1, C.ALIGN_MAX_ITER + 1):
             left = max(0.5, deadline - time.time())
-            obj, _frame = finder.find_stable(self._finder_observe(), self.cam,
-                                             timeout=left)
+            obj, frame_img = finder.find_stable(self._finder_observe(), self.cam,
+                                                timeout=left)
             if obj is None:
                 print(f"  [纠偏] 第{i}轮未检出稳定物料, 放弃对齐(继续流程)")
                 return False
@@ -74,12 +108,18 @@ class StepGrab:
             if residual <= C.ALIGN_TOL_MM:
                 if i > 1:
                     print(f"  [纠偏] 第{i}轮收工, 残差 {residual:.1f}mm")
+                if visualize and frame_img is not None:
+                    shown = show(frame_img, obj, residual, i)
                 return True
             if time.time() > deadline:
                 break
             print(f"  [纠偏] 第{i}轮: 前{dx_fwd:+.1f} 右{dy_right:+.1f} "
                   f"(残差 {residual:.1f}mm) → move_v")
+            if visualize and frame_img is not None:
+                shown = show(frame_img, obj, residual, i)
             self._move_v(dx_fwd, dy_right)
+            if visualize and shown and frame_img is not None:
+                show(frame_img, obj, residual, i, sent=True)
             time.sleep(C.ALIGN_SETTLE)   # 等车沉降再取帧
         print(f"  [纠偏] 超时/超次数, 残差 "
               f"{residual if residual is not None else -1:.1f}mm, 带误差继续(保完赛)")
