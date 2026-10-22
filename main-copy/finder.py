@@ -152,10 +152,10 @@ def refine_material(frame, m, px_per_mm=None):
 
 
 def refine_material_stages(frame, m, px_per_mm=None, param1=None, param2=None,
-                           pick=None):
+                           r_lo=None, r_hi=None, pick=None):
     """refine_material 的带中间图版本(可视化测试台用), 返回 (是否命中, stages)。"""
-    hit, stages = hough_stages(frame, m.box, param1=param1, param2=param2,
-                               pick=pick)
+    hit, stages = hough_stages(frame, m.box, r_lo=r_lo, r_hi=r_hi,
+                               param1=param1, param2=param2, pick=pick)
     if hit is None:
         m.hough = None
         return False, stages
