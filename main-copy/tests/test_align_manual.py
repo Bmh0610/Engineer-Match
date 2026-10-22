@@ -100,7 +100,10 @@ def main():
             round_no += 1
             one_round(backend, cam, args.conf, round_no)
         k = cv2.waitKey(30) & 0xFF
-        if k == ord("q"):
+        if k == ord("s"):   # 窗口内按 s 也能触发一轮(不依赖终端焦点)
+            round_no += 1
+            one_round(backend, cam, args.conf, round_no)
+        elif k == ord("q"):
             break
     cam.close()
     cv2.destroyAllWindows()

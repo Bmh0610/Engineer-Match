@@ -14,7 +14,8 @@ CAMERA_ID_END = 0              # 末端相机(眼在手, 垂直向下); 编号�
 MODEL_PATH = "/home/popcorn/桌面/train yolov11/best.pt"   # 统一 10 类; .pt/.engine 自适应
 
 # ---- 标定 ----
-# 内参: python3 tools/calib_intr.py 三步生成 vision/calib_end.yaml
+USE_INTRINSICS = False      # 现用无畸变镜头相机: 不加载内参/不去畸变;
+                            # 换回有畸变相机改 True(需先标内参)
 # 比例尺: python3 tools/calib_ratio.py 实测(px/mm), 填这里:
 PX_PER_MM = 4.054              # 2026-10-20 标定: 6 次两点测距均值(±0.027, 离散 0.7%),
                                # 交叉验证 650.8/4.054=160.5mm vs 尺量 166mm 差 3.3% ✓

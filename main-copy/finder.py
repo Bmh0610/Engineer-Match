@@ -15,7 +15,8 @@ import cv2
 import calib
 import config as C
 
-_CALIB = calib.load()   # calib_end.yaml; None=未标定, 回退画面中心
+_CALIB = calib.load() if C.USE_INTRINSICS else None
+# USE_INTRINSICS=False(无畸变镜头相机): 不加载内参, 全链路回退画面中心+免去畸变
 
 
 @dataclass
