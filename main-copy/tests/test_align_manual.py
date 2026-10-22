@@ -30,7 +30,7 @@ def one_round(backend, cam, conf, round_no):
     返回叠加后的显示帧(供主循环持续刷新)。"""
     print("  检测中(取稳定帧, 最多 2s)...", flush=True)
     obj, frame_img = finder.find_stable(
-        lambda f: finder.nearest(finder.find_materials(
+        lambda f: finder.nearest_to_axis(finder.find_materials(
             backend, f, conf=conf, px_per_mm=C.PX_PER_MM)),
         cam, timeout=2.0)
     if obj is None:
@@ -86,7 +86,7 @@ def main():
         # 每帧实时检测叠加(YOLO框+霍夫顶面圆+主点十字)
         mats = finder.find_materials(backend, frame, conf=args.conf,
                                      px_per_mm=C.PX_PER_MM)
-        m = finder.nearest(mats)
+        m = finder.nearest_to_axis(mats)
         if m is not None:
             finder.refine_material_stages(
                 frame, m, C.PX_PER_MM, r_lo=finder.CAP_R_LO,

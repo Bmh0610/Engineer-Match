@@ -194,6 +194,18 @@ def nearest(materials):
     return max(materials, key=lambda m: m.cy) if materials else None
 
 
+def nearest_to_axis(materials):
+    """选离主点(相机光轴正下方)最近的物料: 垂直视角、畸变与透视偏移最小,
+    定位基准首选(多物料同框时, 边缘斜视角的物料误差可达数 mm~cm)。"""
+    if not materials:
+        return None
+    if _CALIB:
+        px, py = _CALIB.principal_point()
+    else:
+        return nearest(materials)   # 无内参无法定主点, 回退画面最下
+    return min(materials, key=lambda m: (m.cx - px) ** 2 + (m.cy - py) ** 2)
+
+
 def find_stable(finder, cam, timeout=3.0, need=None, tol_px=None):
     """循环取帧直到目标连续 need 帧中心位移 < tol_px(稳定判据, gcxl 同款)。
 
