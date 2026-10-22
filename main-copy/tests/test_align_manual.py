@@ -22,6 +22,8 @@ import finder         # noqa: E402
 from protocol import Mode, frame   # noqa: E402
 from test_yolo_live import render   # noqa: E402  复用主画面渲染(同目录)
 
+HOUGH_P2_SOFT = 20   # 实拍顶面边缘弱, 累加器门槛比线上(30)放宽
+
 
 def one_round(backend, cam, conf, round_no):
     """一轮纠偏判定: 稳定帧 → 检测+霍夫顶面 → 打印偏差与 12 字节纠偏帧。
@@ -35,7 +37,8 @@ def one_round(backend, cam, conf, round_no):
         print("  !! 未检出稳定物料(视野/物料确认), 再回车重试")
         return frame_img
     hit, _st = finder.refine_material_stages(
-        frame_img, obj, C.PX_PER_MM, r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI)
+        frame_img, obj, C.PX_PER_MM, r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI,
+        param2=HOUGH_P2_SOFT)
     src = "霍夫顶面" if hit else "bbox中心(霍夫未命中)"
     dy_right = obj.dx_mm * C.IMG2BODY[0]
     dx_fwd = obj.dy_mm * C.IMG2BODY[1]
@@ -75,19 +78,27 @@ def main():
     print("流程: 终端回车=纠偏一轮 → 发输出的 12 字节帧 → 车停 → 再回车; "
           "q+回车 或 窗口内按 q 退出")
 
-    disp = None          # 最近一轮的叠加帧(无则显示原帧)
     round_no = 0
     while True:
         frame = cam.read_latest()
-        if frame is not None:
-            cv2.imshow("align_manual", disp if disp is not None else frame)
-        # 非阻塞监听终端回车(画面不被 input 卡死)
+        if frame is None:
+            continue
+        # 每帧实时检测叠加(YOLO框+霍夫顶面圆+主点十字)
+        mats = finder.find_materials(backend, frame, conf=args.conf,
+                                     px_per_mm=C.PX_PER_MM)
+        m = finder.nearest(mats)
+        if m is not None:
+            finder.refine_material_stages(
+                frame, m, C.PX_PER_MM, r_lo=finder.CAP_R_LO,
+                r_hi=finder.CAP_R_HI, param2=HOUGH_P2_SOFT)
+        cv2.imshow("align_manual", render(frame, mats, m))
+        # 非阻塞监听终端回车(触发一轮带数字输出的纠偏判定)
         if select.select([sys.stdin], [], [], 0)[0]:
             line = sys.stdin.readline().strip()
             if line.lower() == "q":
                 break
             round_no += 1
-            disp = one_round(backend, cam, args.conf, round_no)
+            one_round(backend, cam, args.conf, round_no)
         k = cv2.waitKey(30) & 0xFF
         if k == ord("q"):
             break
