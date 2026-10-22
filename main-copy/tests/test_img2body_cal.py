@@ -21,6 +21,7 @@ sys.path.insert(0, str(BASE))
 
 import config as C    # noqa: E402
 import finder         # noqa: E402
+from protocol import Mode, frame   # noqa: E402
 
 HOUGH_P2_SOFT = 20    # 实拍顶面边缘弱, 累加器门槛放宽
 STEP = 100.0          # 标定移动步长 mm
@@ -78,11 +79,19 @@ def main():
     print("把物料放在视野中央(全程不动)。跟着提示: 发车控命令 → 停稳 → 回车采样")
 
     pts = []
+    steps = [(0.0, float(STEP), 0.0, f"前进{STEP:.0f}"),
+             (float(STEP), 0.0, 0.0, f"右移{STEP:.0f}")]
     prompts = ["回车1: 采基准圆心 p0",
-               f"发 move_v(0, {STEP:.0f}, 0) 前进{STEP:.0f}mm, 停稳后回车2 采 p1",
-               f"发 move_v({STEP:.0f}, 0, 0) 右移{STEP:.0f}mm, 停稳后回车3 采 p2"]
-    for pr in prompts:
-        input(pr + " ...")
+               "第2步: 发『前进100』帧, 停稳后回车2 采 p1",
+               "第3步: 发『右移100』帧, 停稳后回车3 采 p2"]
+    for (x, y, z, label), pr in zip(steps, prompts[1:]):
+        tx = frame(Mode.MOVE_V, int(x), int(y), int(z))
+        print(f"\n{pr}")
+        print(f"  协议帧: {tx.hex(' ').upper()}")
+        print("  发送: python3 -c \"import serial; "
+              "serial.Serial('/dev/ttyUSB0',115200,timeout=0.1)"
+              f".write(bytes.fromhex('{tx.hex()}'))\"")
+        input("  车停稳后回车采样 ...")
         c = grab_center(backend, cam, args.conf)
         if c is None:
             print("!! 未检出稳定物料, 本步骤重来")
