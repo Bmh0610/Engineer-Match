@@ -15,6 +15,9 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
+import os
+os.environ.setdefault("QT_LOGGING_RULES", "*.debug=false;*.warning=false")
+
 import cv2   # noqa: E402
 
 import config as C    # noqa: E402
