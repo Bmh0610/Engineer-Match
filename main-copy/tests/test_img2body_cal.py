@@ -47,7 +47,8 @@ def solve_img2body(d_right_pix, d_fwd_pix, step=STEP):
 
 
 def grab_center(backend, cam, conf):
-    """稳定帧 + 霍夫顶面精化 → (cx, cy); 检不出返回 None。"""
+    """稳定帧 + 霍夫顶面精化 → (cx, cy); 检不出返回 None。
+    采样帧画框/圆心/霍夫圈显示在窗口(停 300ms 供目视确认)。"""
     obj, frame = finder.find_stable(
         lambda f: finder.nearest_to_axis(finder.find_materials(
             backend, f, conf=conf, px_per_mm=C.PX_PER_MM)),
@@ -58,7 +59,15 @@ def grab_center(backend, cam, conf):
                                   r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI,
                                   param2=HOUGH_P2_SOFT)
     import cv2
-    cv2.imshow("img2body_cal", frame)
+    vis = frame.copy()
+    x1, y1, x2, y2 = map(int, obj.box)
+    cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 0, 0), 2)
+    cv2.circle(vis, (int(obj.cx), int(obj.cy)), 4, (0, 0, 255), -1)
+    if obj.hough is not None:
+        hx, hy, hr = obj.hough
+        cv2.circle(vis, (int(hx), int(hy)), max(int(hr), 3), (255, 255, 255), 1)
+    cv2.imshow("img2body_cal", vis)
+    cv2.waitKey(300)   # 停留 300ms 供目视确认采样质量
     return obj.cx, obj.cy
 
 
