@@ -3,11 +3,12 @@
 流程: 回车 → 取稳定帧(连续2帧位移<2px) → YOLO+霍夫顶面小圆(30mm 实测校准)
 → 打印车体系偏差(X右/Y前, mm, 带±)与**完整 12 字节协议纠偏帧**(CRC 现算)
 → 你发帧 → 车动 → 停稳 → 再回车 → 下一轮; 残差 ≤ 3mm 提示收敛完成。
-画面窗口实时跟随(回车瞬间取帧检测)。q+回车 退出。
+画面窗口全程实时刷新(select 非阻塞监听终端, 不会卡"未响应")。q 退出(两处均可)。
 
 用法: python3 tests/test_align_manual.py --cam 2
 """
 import argparse
+import select
 import sys
 from pathlib import Path
 
@@ -23,33 +24,34 @@ from test_yolo_live import render   # noqa: E402  复用主画面渲染(同目�
 
 
 def one_round(backend, cam, conf, round_no):
-    """一轮纠偏判定: 稳定帧 → 检测+霍夫顶面 → 偏差与 12 字节纠偏帧。"""
+    """一轮纠偏判定: 稳定帧 → 检测+霍夫顶面 → 打印偏差与 12 字节纠偏帧。
+    返回叠加后的显示帧(供主循环持续刷新)。"""
+    print("  检测中(取稳定帧, 最多 2s)...", flush=True)
     obj, frame_img = finder.find_stable(
         lambda f: finder.nearest(finder.find_materials(
             backend, f, conf=conf, px_per_mm=C.PX_PER_MM)),
         cam, timeout=2.0)
     if obj is None:
-        print("  !! 未检出稳定物料(视野/物料确认), 再按回车重试")
-        return
+        print("  !! 未检出稳定物料(视野/物料确认), 再回车重试")
+        return frame_img
     hit, _st = finder.refine_material_stages(
         frame_img, obj, C.PX_PER_MM, r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI)
     src = "霍夫顶面" if hit else "bbox中心(霍夫未命中)"
     dy_right = obj.dx_mm * C.IMG2BODY[0]
     dx_fwd = obj.dy_mm * C.IMG2BODY[1]
     residual = (dy_right ** 2 + dx_fwd ** 2) ** 0.5
-    cv2.imshow("align_manual", render(frame_img, [obj], obj))
     if residual <= C.ALIGN_TOL_MM:
         print(f"[r{round_no}] ✓ 已收敛: X右{dy_right:+.1f} Y前{dx_fwd:+.1f} "
               f"残差 {residual:.1f}mm ≤ {C.ALIGN_TOL_MM:.0f}mm —— 定位完成!")
-        return
-    # 纠偏帧 = move_v(±X右, ±Y前, 0): 车走这一步, 物料即回到主点(偏差消除)
-    tx = frame(Mode.MOVE_V, round(dy_right), round(dx_fwd), 0)
-    print(f"[r{round_no}] {src}: X右{dy_right:+.1f} Y前{dx_fwd:+.1f}mm "
-          f"(残差 {residual:.1f}mm)")
-    print(f"  纠偏帧: {tx.hex(' ').upper()}")
-    print("  发送: python3 -c \"import serial; "
-          "serial.Serial('/dev/ttyUSB0',115200,timeout=0.1)"
-          f".write(bytes.fromhex('{tx.hex()}'))\"")
+    else:
+        print(f"[r{round_no}] {src}: X右{dy_right:+.1f} Y前{dx_fwd:+.1f}mm "
+              f"(残差 {residual:.1f}mm)")
+        tx = frame(Mode.MOVE_V, round(dy_right), round(dx_fwd), 0)
+        print(f"  纠偏帧: {tx.hex(' ').upper()}")
+        print("  发送: python3 -c \"import serial; "
+              "serial.Serial('/dev/ttyUSB0',115200,timeout=0.1)"
+              f".write(bytes.fromhex('{tx.hex()}'))\"")
+    return render(frame_img, [obj], obj)
 
 
 def main():
@@ -70,18 +72,25 @@ def main():
         c = finder._CALIB
         print(f"内参: 主点=({c.cx:.1f},{c.cy:.1f}) | 比例尺 {C.PX_PER_MM} px/mm | "
               f"死区 {C.ALIGN_TOL_MM:.0f}mm")
-    print("流程: 回车=纠偏一轮 → 发输出的 12 字节帧 → 车停 → 再回车; q+回车 退出")
+    print("流程: 终端回车=纠偏一轮 → 发输出的 12 字节帧 → 车停 → 再回车; "
+          "q+回车 或 窗口内按 q 退出")
 
+    disp = None          # 最近一轮的叠加帧(无则显示原帧)
     round_no = 0
     while True:
-        try:
-            cmd = input(f"[r{round_no + 1}] 回车=纠偏一轮 / q=退出: ").strip()
-        except EOFError:
+        frame = cam.read_latest()
+        if frame is not None:
+            cv2.imshow("align_manual", disp if disp is not None else frame)
+        # 非阻塞监听终端回车(画面不被 input 卡死)
+        if select.select([sys.stdin], [], [], 0)[0]:
+            line = sys.stdin.readline().strip()
+            if line.lower() == "q":
+                break
+            round_no += 1
+            disp = one_round(backend, cam, args.conf, round_no)
+        k = cv2.waitKey(30) & 0xFF
+        if k == ord("q"):
             break
-        if cmd.lower() == "q":
-            break
-        round_no += 1
-        one_round(backend, cam, args.conf, round_no)
     cam.close()
     cv2.destroyAllWindows()
 
