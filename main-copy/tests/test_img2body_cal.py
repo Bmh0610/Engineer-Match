@@ -21,7 +21,7 @@ import cv2   # noqa: E402
 
 import config as C    # noqa: E402
 import finder         # noqa: E402
-from protocol import Mode, frame   # noqa: E402
+from protocol import Mode, frame as make_frame   # noqa: E402
 from test_yolo_live import render   # noqa: E402
 
 HOUGH_P2_SOFT = 20    # 实拍顶面边缘弱, 累加器门槛放宽
@@ -85,9 +85,9 @@ def main():
     backend = YOLOBackend(args.model)
     print("物料放视野中央全程不动。三步采样:")
     print("  p0      : 不动, 直接回车采基准")
-    tx1 = frame(Mode.MOVE_V, 0, int(STEP), 0)
+    tx1 = make_frame(Mode.MOVE_V, 0, int(STEP), 0)
     print(f"  p1 之前 : 发帧 {tx1.hex(' ').upper()}  (前进{STEP:.0f})")
-    tx2 = frame(Mode.MOVE_V, int(STEP), 0, 0)
+    tx2 = make_frame(Mode.MOVE_V, int(STEP), 0, 0)
     print(f"  p2 之前 : 发帧 {tx2.hex(' ').upper()}  (右移{STEP:.0f})")
     print("  发送命令模板(把 <帧hex> 换成上面对应帧, 去空格):")
     print('  python3 -c "import serial; serial.Serial(\'/dev/ttyUSB0\',115200,'
@@ -126,7 +126,7 @@ def main():
             round_no += 1
             if 1 <= len(pts) <= 2:
                 x, y, z, label = steps[len(pts) - 1]
-                txc = frame(Mode.MOVE_V, x, y, z)
+                txc = make_frame(Mode.MOVE_V, x, y, z)
                 print(f"  本步先发帧: {txc.hex(' ').upper()} ({label}), 停稳后再回车采样")
                 continue
             c = grab_center(backend, cam, args.conf, expect)
