@@ -20,8 +20,8 @@ from protocol import Mode  # noqa: E402
 
 def drive_and_align(lk, cam, backend, visualize=False,
                     moves=((0, 0, -90, "右转90°"),
-                           (0, 1000, 0, "前进1000mm"),
-                           (-100, 0, 0, "左移100mm"))):
+                           (-100, 0, 0, "左移100mm"),
+                           (0, 1000, 0, "前进1000mm"))):
     """动作序列 + 纠偏, 一个函数跑完。
 
     moves: 每条 (x, y, z, 说明) 车体系相对量——x 右(臂侧) y 前(车头)

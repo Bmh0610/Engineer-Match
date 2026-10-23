@@ -57,8 +57,17 @@ class StepGrab:
 
     def _finder_observe(self):
         px = C.PX_PER_MM
-        return lambda f: finder.nearest(
-            finder.find_materials(self.backend, f, conf=0.5, px_per_mm=px))
+
+        def _find(f):
+            mats = finder.find_materials(self.backend, f, conf=0.5,
+                                         px_per_mm=px)
+            m = finder.nearest_to_axis(mats)   # 主点正下方: 垂直视角误差最小
+            if m is not None:                  # 三级链精化: 圆盘→椭圆→bbox
+                finder.refine_material_stages(f, m, px,
+                                              r_lo=finder.CAP_R_LO,
+                                              r_hi=finder.CAP_R_HI)
+            return m
+        return _find
 
     @staticmethod
     def _draw_align(frame, obj, residual, round_no, sent=False):
@@ -106,8 +115,7 @@ class StepGrab:
             dx_fwd, dy_right = self._to_body(obj)
             residual = math.hypot(dx_fwd, dy_right)
             if residual <= C.ALIGN_TOL_MM:
-                if i > 1:
-                    print(f"  [纠偏] 第{i}轮收工, 残差 {residual:.1f}mm")
+                print(f"  ✓ 纠偏结束 (残差 {residual:.1f}mm, {i} 轮)")
                 if visualize and frame_img is not None:
                     shown = show(frame_img, obj, residual, i)
                 return True
@@ -121,8 +129,8 @@ class StepGrab:
             if visualize and shown and frame_img is not None:
                 show(frame_img, obj, residual, i, sent=True)
             time.sleep(C.ALIGN_SETTLE)   # 等车沉降再取帧
-        print(f"  [纠偏] 超时/超次数, 残差 "
-              f"{residual if residual is not None else -1:.1f}mm, 带误差继续(保完赛)")
+        print(f"  纠偏结束(带误差 {residual if residual is not None else -1:.1f}mm, "
+              f"保完赛)")
         return False
 
     # ---- 阶段 B: 伸臂到转盘中心 ----
