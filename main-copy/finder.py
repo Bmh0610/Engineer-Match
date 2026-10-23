@@ -195,6 +195,12 @@ def nearest(materials):
     return max(materials, key=lambda m: m.cy) if materials else None
 
 
+def to_body(obj):
+    """图像偏差(mm) → 车体系 (dy_right, dx_fwd), 2x2 矩阵 config.IMG2BODY。"""
+    a, b, c, d = C.IMG2BODY
+    return a * obj.dx_mm + b * obj.dy_mm, c * obj.dx_mm + d * obj.dy_mm
+
+
 def nearest_to_axis(materials):
     """选离主点(相机光轴正下方)最近的物料: 垂直视角、畸变与透视偏移最小,
     定位基准首选(多物料同框时, 边缘斜视角的物料误差可达数 mm~cm)。"""
