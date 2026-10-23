@@ -74,10 +74,6 @@ HOUGH_PARAM2 = 30       # 圆心累加器门槛(检出少/漏检→调低, 误�
 # 排除之(若 YOLO 框明显大于底面, 1/4 键实测微调)。
 CAP_R_LO, CAP_R_HI = 0.55, 0.90
 # 注意: HoughCircles 的 minDist(=估计半径)会抑制同心近距双圆——单次调用拿不到
-# "大圆+小圆"两个候选(min_r 无从选起), 收窄半径是单次霍夫定位顶面的唯一解;
-# 两阶段霍夫(先大圆再限制 ROI/半径找小圆)是后备。
-CAP_R_LO, CAP_R_HI = 0.25, 0.60
-
 
 def hough_stages(frame, box, pad=None, r_lo=None, r_hi=None,
                  param1=None, param2=None, pick="nearest"):
@@ -172,22 +168,16 @@ def refine_material_stages(frame, m, px_per_mm=None, param1=None, param2=None,
         stages["source"] = source
         return True
 
-    # 1) 顶面椭圆(主)
-    center, est = fit_top_center(frame, m.box)
+    # 1) 圆盘中心(主, 近垂直俯视下顶/底同心)
+    disc, est = fit_top_center(frame, m.box)
     stages.update(est)
-    if center is not None:
-        stages["source"] = "ellipse"
-        m.ellipse = est.get("ellipse")   # 原图坐标 ((cx,cy),(MA,ma),ang)
-        return _apply(*center, "ellipse"), stages
-    # 2) 霍夫正圆(备)
-    hit, hst = hough_stages(frame, m.box, r_lo=r_lo, r_hi=r_hi,
-                            param1=param1, param2=param2, pick=pick)
-    stages.update({k: v for k, v in hst.items() if k != "offset"})
-    if hit is not None:
-        stages["source"] = "hough"
-        m.hough = hit
-        return _apply(*hit, "hough"), stages
-    # 3) bbox 中心(兜底): 带透视系统偏差, 仅保流程不断
+    if disc is not None:
+        cx, cy, r = disc
+        stages["source"] = "disc"
+        m.ellipse = ((cx, cy), (2 * r, 2 * r), 0)   # render 画正圆
+        return _apply(cx, cy, "disc"), stages
+    # 2) bbox 中心(兜底): 带透视系统偏差, 仅保流程不断
+    #    (霍夫正圆已退役: 斜视时顶面投影为椭圆, 正圆假设不成立)
     stages["source"] = "bbox"
     return False, stages
 
@@ -453,12 +443,15 @@ def _otsu_in_mask(v, mask):
 
 
 def fit_top_center(frame, box, pad=0.10):
-    """ROI 内两级分割出顶面 → fitEllipse → 顶面圆心投影 (cx, cy)。
+    """ROI 内物料剪影 → 最大轮廓 → 最小外接圆 → 圆盘中心 (cx, cy, r)。
 
-    两级: HSV 蓝色剪影(物料 vs 白背景) → 剪影内 V 通道中位数分层
-    (顶面受光较亮 vs 侧面较暗)。最大轮廓 fitEllipse, 椭圆中心即圆心。
-    返回 ((cx, cy), stages); 失败 (None, stages)。stages 供可视化。
+    近垂直俯视下物料顶/底面同心, 圆盘中心即抓取基准点(斜视时顶/底投影
+    圆心有高度×视角的透视偏移, 随俯角减小而缩小)。
+    六色通用剪影: 彩色(高饱和)或暗(低亮度)=物料, 白背景排除。
+    毛刺防护: 轮廓面积应占外接圆一半以上, 否则拒绝。
+    返回 ((cx, cy, r), stages); 失败 (None, stages)。
     """
+    import numpy as np
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
     H, W = frame.shape[:2]
@@ -466,37 +459,27 @@ def fit_top_center(frame, box, pad=0.10):
     rx2, ry2 = min(int(x2 + w * pad), W), min(int(y2 + h * pad), H)
     roi = frame[ry1:ry2, rx1:rx2]
     stages = {"offset": (rx1, ry1)}
-    import numpy as np
     if roi.size == 0:
         return None, stages
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     s_ch, v_ch = hsv[:, :, 1], hsv[:, :, 2]
-    # 物料剪影(六色通用): 彩色(高饱和) 或 黑色(低亮度); 白纸背景两者皆非
-    body = cv2.inRange(hsv, (0, 60, 40), (180, 255, 255))      # 彩色: S≥60
-    body |= cv2.inRange(hsv, (0, 0, 0), (180, 255, 89))        # 黑/暗: V<90
+    body = cv2.inRange(hsv, (0, 60, 40), (180, 255, 255))     # 彩色: S≥60
+    body |= cv2.inRange(hsv, (0, 0, 0), (180, 255, 89))       # 黑/暗: V<90
     body = cv2.morphologyEx(body, cv2.MORPH_OPEN,
                             np.ones((3, 3), np.uint8))
     stages["body_mask"] = body
-    if cv2.countNonZero(body) < 200:
-        return None, stages
-    t = _otsu_in_mask(v_ch, body)         # 剪影内 Otsu: 分顶面(亮)/侧面(暗)
-    top = cv2.bitwise_and(cv2.threshold(v_ch, t, 255, cv2.THRESH_BINARY)[1],
-                          body)
-    top = cv2.morphologyEx(top, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    stages["top_mask"] = top
-    contours, _ = cv2.findContours(top, cv2.RETR_EXTERNAL,
+    contours, _ = cv2.findContours(body, cv2.RETR_EXTERNAL,
                                    cv2.CHAIN_APPROX_SIMPLE)
-    cnt = max(contours, key=cv2.contourArea) if contours else None
-    if cnt is None or cv2.contourArea(cnt) < 150 or len(cnt) < 5:
-        # 分层失败(黑色物料顶/侧同暗等): 回退整体剪影拟合(中心近似, 无分层精度)
-        contours, _ = cv2.findContours(body, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None, stages
-        cnt = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(cnt) < 150 or len(cnt) < 5:
-            return None, stages
-        stages["fallback_body"] = True
-    (cx, cy), (MA, ma), ang = cv2.fitEllipse(cnt)
-    stages["ellipse"] = ((cx + rx1, cy + ry1), (MA, ma), ang)   # 原图坐标
-    return (float(cx) + rx1, float(cy) + ry1), stages
+    if not contours:
+        return None, stages
+    cnt = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(cnt)
+    if area < 150:
+        return None, stages
+    (cx, cy), r = cv2.minEnclosingCircle(cnt)
+    if area < 0.5 * np.pi * r * r:   # 毛刺防护: 轮廓应占外接圆大半
+        return None, stages
+    stages["circle"] = ((cx + rx1, cy + ry1), r)   # 原图坐标
+    return (float(cx) + rx1, float(cy) + ry1, float(r)), stages
+
+
