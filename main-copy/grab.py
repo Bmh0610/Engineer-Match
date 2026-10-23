@@ -5,9 +5,9 @@
 流程(移植 gcxl2025-main: adjust_position_to_target 骨架 + "下探→夹→抬"三段式):
   A 定位纠偏: 看(稳定帧最近物料圆心) → 死区内收工 / move_v 微调后再看,
     超时告警继续(保完赛);
-  B 伸臂: move_a 到 CENTER 预设, 末端相机自检应见 3 物料(不足退回 A 重纠一次);
-  C 抓取×3: 守中心位上方等目标色进窗+转盘停歇连帧确认(守株待兔) →
-    出手前 move_v 微调 → 下探/夹/抬 → 移载物盘/降/张/抬 → 回中心位待命。
+  C 抓取×3(定一抓三, 无伸臂对位步骤): 守主点上方等目标色进窗+转盘停歇
+    连帧确认 → 按点控制机械臂(物料偏差→Δ伸出+夹爪15补偿/Δ回转) →
+    下探/夹/抬 → 移载物盘/降/张/抬 → 回观察位待命。
 软失败(视觉超时/检不出)=告警+跳过, 保完赛; 硬失败(通信静默 LinkError)=抛出
 终止 —— 臂/车位姿不明时继续盲编排不安全, 重摆重跑。
 抓取微调走底盘 move_v: 臂与车刚性连接, 底盘微调即臂对物料的相对修正,
@@ -150,36 +150,32 @@ class StepGrab:
             print(f"  !! {color} 超时未进抓取窗(含换料等待), 跳过该色(计时不中断) !!")
             return False
         print(f"  确认 {color} conf={m.conf:.2f} 偏差px=({m.dx:+.1f},{m.dy:+.1f})")
-        # 按点控制机械臂: 物料中心偏差(相对主点) → 臂增量(底盘不参与抓取)
-        dy_right, dx_fwd = finder.to_body(m)   # 车体系 (右, 前) mm
-        reach_c, h_c, theta_c = C.CENTER
+        # 按点控制机械臂(底盘不参与): 物料中心偏差(相对主点) → 臂增量。
+        # 基准 = 纠偏完成时的臂位姿(观察位): 第一个物料已被纠偏到主点下,
+        # 守株待兔让后续物料也转到主点下 → 每个物料 Δ一致。
+        reach_b, h_b, theta_b = C.OBSERVE
         d_reach = dy_right + C.GRIP_REACH_COMP   # 物料偏臂侧→多伸; 夹爪差15补偿
-        d_theta = (math.degrees(math.atan2(dx_fwd, reach_c))
-                   if reach_c > 0 else 0.0)      # 物料偏车头→逆时针(正)
+        r_at = reach_b + d_reach                 # 物料所在伸出距离(回转分母)
+        d_theta = (math.degrees(math.atan2(dx_fwd, r_at))
+                   if r_at > 20 else 0.0)        # 物料偏车头→逆时针(正)
         print(f"  按点抓取 {color}: 物料 右{dy_right:+.1f} 前{dx_fwd:+.1f}mm → "
               f"Δ伸出{d_reach:+.1f} Δ回转{d_theta:+.2f}°")
-        self.move_arm(reach_c + d_reach, C.H_GRAB, theta_c + d_theta,
+        self.move_arm(reach_b + d_reach, C.H_GRAB, theta_b + d_theta,
                       label="按点对位下探")
         self.grip(close=True)
-        self.move_arm(reach_c, h_c, theta_c, label="抬升")
+        self.move_arm(reach_b, h_b, theta_b, label="抬升")
         self.move_arm(*C.CARRIER, label="移到载物盘上方")
         self.move_arm(C.CARRIER[0], C.H_PLACE, C.CARRIER[2], label="下降放料")
         self.grip(close=False)
         self.move_arm(*C.CARRIER, label="抬升离盘")
-        self.move_arm(*C.CENTER, label="回中心位待命")
+        self.move_arm(*C.OBSERVE, label="回观察位待命")
         return True
 
     def run(self, colors=None):
-        """三阶段串行: A+B(不收敛退回重纠一次) → C 逐色抓取。返回统计。"""
+        """纠偏(定一) → 逐色按点抓取(抓三)。返回统计。"""
         colors = colors or C.GRAB_COLORS
-        print(f"== Step_Grab: 纠偏 → 伸臂 → 抓取 {colors} ==")
-        for attempt in (1, 2):
-            self.align()
-            if self.extend_center():
-                break
-            if attempt == 1:
-                print("  退回观察位, 重纠一次")
-                self.move_arm(*C.OBSERVE, label="回观察位")
+        print(f"== Step_Grab: 纠偏 → 抓取 {colors} ==")
+        self.align()   # 定一: 纠偏把第一个物料对准主点下(观察位相机视野)
         for color in colors:
             self.stats["grab_total"] += 1
             if self.grab_one(color):
