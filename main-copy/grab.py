@@ -62,23 +62,23 @@ class StepGrab:
             mats = finder.find_materials(self.backend, f, conf=0.5,
                                          px_per_mm=px)
             m = finder.nearest_to_axis(mats)   # 主点正下方: 垂直视角误差最小
-            if m is not None:                  # 三级链精化: 圆盘→椭圆→bbox
-                finder.refine_material_stages(f, m, px,
-                                              r_lo=finder.CAP_R_LO,
-                                              r_hi=finder.CAP_R_HI)
+            if m is not None:                  # 圆盘定位精化
+                finder.refine_material_stages(f, m, px)
             return m
         return _find
 
     @staticmethod
     def _draw_align(frame, obj, residual, round_no, sent=False):
-        """纠偏可视化: 物料框+圆心+霍夫圈+残差(供 align(visualize=True))。"""
+        """纠偏可视化: 物料框+圆心+定位圈+残差(供 align(visualize=True))。"""
         vis = frame.copy()
         x1, y1, x2, y2 = map(int, obj.box)
         cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 0, 0), 2)
         cv2.circle(vis, (int(obj.cx), int(obj.cy)), 4, (0, 0, 255), -1)
-        if getattr(obj, "hough", None):
-            hx, hy, hr = obj.hough
-            cv2.circle(vis, (int(hx), int(hy)), max(int(hr), 3), (255, 255, 255), 1)
+        if getattr(obj, "ellipse", None):
+            (hx, hy), (MA, ma), ang = obj.ellipse
+            cv2.ellipse(vis, (int(hx), int(hy)),
+                        (max(int(MA / 2), 3), max(int(ma / 2), 3)), ang, 0, 360,
+                        (255, 255, 255), 1)
         dy_right = obj.dx_mm * C.IMG2BODY[0]
         dx_fwd = obj.dy_mm * C.IMG2BODY[1]
         tag = (f"align r{round_no}: X{dy_right:+.1f} Y{dx_fwd:+.1f}mm "
@@ -134,20 +134,6 @@ class StepGrab:
         return False
 
     # ---- 阶段 B: 伸臂到转盘中心 ----
-
-    def extend_center(self):
-        """move_a 到中心位预设, 末端相机自检应见 3 物料。"""
-        self.move_arm(*C.CENTER, label="伸臂到转盘中心")
-        f = self.cam.read_latest()
-        n = 0
-        if f is not None:
-            n = len(finder.find_materials(self.backend, f, conf=0.5,
-                                          px_per_mm=C.PX_PER_MM))
-        if n < 3:
-            print(f"  !! 中心位只见 {n}/3 个物料: 可能未对准转盘中心或物料在背面 !!")
-        return n >= 3
-
-    # ---- 阶段 C: 守株待兔 + 三段式抓放 ----
 
     def grab_one(self, color):
         """等目标色进窗+转盘停歇 → 微调 → 抓(下探/夹/抬) → 放载物盘(降/张/抬)

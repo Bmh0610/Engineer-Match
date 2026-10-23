@@ -58,90 +58,6 @@ def _center_to_dev(cx_raw, cy_raw, frame_shape):
     else:
         cx, cy, cx0, cy0 = cx_raw, cy_raw, w / 2, h / 2
     return cx, cy, cx - cx0, cy - cy0
-
-
-# ---- 霍夫圆精化(YOLO 框内传统 CV 找圆心; backlog 项, 参数联调可调) ----
-
-HOUGH_PAD = 0.15        # ROI 外扩比例(给霍夫边缘留余量)
-HOUGH_R_LO, HOUGH_R_HI = 0.55, 1.35   # 搜索半径 = 估计半径(框短边/2)的倍数
-HOUGH_PARAM1 = 120      # Canny 高阈值(霍夫内部边缘检测; 低阈值自动取其一半)
-HOUGH_PARAM2 = 30       # 圆心累加器门槛(检出少/漏检→调低, 误检→调高)
-
-# 顶面模式: 物料上小下大, YOLO 框住整体立体 → 收窄半径范围专找顶面小圆。
-# 实测依据(2026-10-21): 顶圆直径 30mm → 半径 15mm×4.054 ≈ 61px; 实拍框宽~160px
-# → r_est≈75-80px → 顶面半径 ≈ r_est×0.76~0.8。旧上限 0.60 恰好把顶圆卡在
-# maxRadius 外(实拍始终检不出的直接原因)。底面大圆半径 ≈ r_est×1.0, 上限 0.90
-# 排除之(若 YOLO 框明显大于底面, 1/4 键实测微调)。
-CAP_R_LO, CAP_R_HI = 0.55, 0.90
-# 注意: HoughCircles 的 minDist(=估计半径)会抑制同心近距双圆——单次调用拿不到
-
-def hough_stages(frame, box, pad=None, r_lo=None, r_hi=None,
-                 param1=None, param2=None, pick="nearest"):
-    """霍夫圆检测全流水线(带中间图): 返回 (命中圆 或 None, stages 字典)。
-
-    命中圆 = (cx, cy, r) 原图像素; 检不出返回 (None, stages)。
-    stages: {roi, gray, blur, binary, edges, candidates(ROI 坐标 Nx3 或 None),
-             best_roi(ROI 坐标命中圆或 None), offset(ROI 原点), params}
-    参数缺省时用 HOUGH_* 模块常量(线上默认行为); 测试台调参时显式传值。
-    binary 为 Otsu 二值图, 仅供可视化观察物料/背景分离——霍夫输入仍是模糊灰度图。
-    pick: 多候选选择策略——"nearest"=离框心最近(默认), "min_r"=半径最小优先
-    (顶面圆比底面小, 半径最小优先更抗框心偏移)。
-    """
-    pad = HOUGH_PAD if pad is None else pad
-    r_lo = HOUGH_R_LO if r_lo is None else r_lo
-    r_hi = HOUGH_R_HI if r_hi is None else r_hi
-    param1 = HOUGH_PARAM1 if param1 is None else param1
-    param2 = HOUGH_PARAM2 if param2 is None else param2
-
-    x1, y1, x2, y2 = box
-    w, h = x2 - x1, y2 - y1
-    H, W = frame.shape[:2]
-    rx1, ry1 = max(int(x1 - w * pad), 0), max(int(y1 - h * pad), 0)
-    rx2, ry2 = min(int(x2 + w * pad), W), min(int(y2 + h * pad), H)
-    roi = frame[ry1:ry2, rx1:rx2]
-    stages = {"offset": (rx1, ry1), "params": (pad, r_lo, r_hi, param1, param2)}
-    if roi.size == 0:
-        stages.update(roi=None, gray=None, blur=None, binary=None,
-                      edges=None, candidates=None, best_roi=None)
-        return None, stages
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 1.5)
-    stages["roi"] = roi
-    stages["gray"] = gray
-    stages["blur"] = blur
-    stages["binary"] = cv2.threshold(gray, 0, 255,
-                                     cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-    stages["edges"] = cv2.Canny(blur, param1 / 2, param1)
-    r_est = min(w, h) / 2
-    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1,
-                               minDist=max(r_est, 10.0),
-                               param1=param1, param2=param2,
-                               minRadius=max(int(r_est * r_lo), 5),
-                               maxRadius=int(r_est * r_hi))
-    stages["candidates"] = None if circles is None else circles[0]
-    if circles is None:
-        stages["best_roi"] = None
-        return None, stages
-    bx, by = (x1 + x2) / 2, (y1 + y2) / 2
-    if pick == "min_r":
-        best = min(circles[0], key=lambda c: c[2])   # 半径最小优先(顶面圆)
-    else:
-        best = min(circles[0], key=lambda c: (c[0] + rx1 - bx) ** 2
-                   + (c[1] + ry1 - by) ** 2)         # 离框心最近(默认)
-    stages["best_roi"] = best
-    return (float(best[0] + rx1), float(best[1] + ry1), float(best[2])), stages
-
-
-def refine_circle(frame, box):
-    """YOLO bbox 内霍夫圆检测 → (cx, cy, r) 原图像素; 检不出返回 None。
-
-    物料俯视圆环基本贴合 bbox → 估计半径 = 短边/2, 在其 0.55~1.35 倍内搜;
-    ROI 外扩、灰度+高斯模糊抗噪; 多候选取离框心最近的。(线上默认参数)
-    """
-    hit, _ = hough_stages(frame, box)
-    return hit
-
-
 def refine_material(frame, m, px_per_mm=None):
     """霍夫圆精化物料圆心: 就地更新 m 的 cx/cy/dx/dy/dx_mm/dy_mm(bbox 不变)。
     返回 True=霍夫命中; False=检不出(bbox 中心保持原值, 调用方无需回退)。"""
@@ -149,8 +65,7 @@ def refine_material(frame, m, px_per_mm=None):
     return ok
 
 
-def refine_material_stages(frame, m, px_per_mm=None, param1=None, param2=None,
-                           r_lo=None, r_hi=None, pick=None):
+def refine_material_stages(frame, m, px_per_mm=None):
     """物料圆心精化, 三级定位链: 椭圆顶面(主) → 霍夫正圆(备) → bbox(兜底)。
 
     透视下顶面投影为椭圆, fitEllipse 的中心即圆心投影, 对弱边缘/椭圆鲁棒;
@@ -415,32 +330,6 @@ class MaterialTracker:
 
 
 # ---- 顶面椭圆定位(透视下顶面投影为椭圆, 霍夫正圆不适; 主定位法) ----
-
-def _otsu_in_mask(v, mask):
-    """mask 区域内的 Otsu 阈值(全图 Otsu 会被亮背景带偏)。"""
-    import numpy as np
-    vals = v[mask > 0]
-    if vals.size == 0:
-        return 128
-    hist = np.bincount(vals, minlength=256)[:256].astype(float)
-    total = vals.size
-    sum_all = float(np.dot(np.arange(256), hist))
-    sum_b, w_b, best_var, best_t = 0.0, 0.0, -1.0, 128
-    for t in range(256):
-        w_b += hist[t]
-        if w_b == 0:
-            continue
-        w_f = total - w_b
-        if w_f <= 0:
-            break
-        sum_b += t * hist[t]
-        m_b = sum_b / w_b
-        m_f = (sum_all - sum_b) / w_f
-        var = w_b * w_f * (m_b - m_f) ** 2
-        if var > best_var:
-            best_var, best_t = var, t
-    return best_t
-
 
 def fit_top_center(frame, box, pad=0.10):
     """ROI 内物料剪影 → 最大轮廓 → 最小外接圆 → 圆盘中心 (cx, cy, r)。

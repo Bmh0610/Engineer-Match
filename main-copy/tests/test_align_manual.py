@@ -25,7 +25,6 @@ import finder         # noqa: E402
 from protocol import Mode, frame   # noqa: E402
 from test_yolo_live import render   # noqa: E402  复用主画面渲染(同目录)
 
-HOUGH_P2_SOFT = 20   # 实拍顶面边缘弱, 累加器门槛比线上(30)放宽
 
 
 def one_round(backend, cam, conf, round_no):
@@ -40,10 +39,9 @@ def one_round(backend, cam, conf, round_no):
         print("  !! 未检出稳定物料(视野/物料确认), 再回车重试")
         return frame_img
     hit, st = finder.refine_material_stages(
-        frame_img, obj, C.PX_PER_MM, r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI,
-        param2=HOUGH_P2_SOFT)
-    src = {"ellipse": "椭圆顶面", "hough": "霍夫正圆"}.get(
-        st.get("source"), "bbox中心(均未命中)") if hit else "bbox中心(均未命中)"
+        frame_img, obj, C.PX_PER_MM)
+    src = {"disc": "圆盘", "ellipse": "椭圆顶面"}.get(
+        st.get("source"), "bbox中心(未命中)") if hit else "bbox中心(未命中)"
     dy_right, dx_fwd = finder.to_body(obj)
     residual = (dy_right ** 2 + dx_fwd ** 2) ** 0.5
     if residual <= C.ALIGN_TOL_MM:
@@ -92,8 +90,7 @@ def main():
         m = finder.nearest_to_axis(mats)
         if m is not None:
             finder.refine_material_stages(
-                frame, m, C.PX_PER_MM, r_lo=finder.CAP_R_LO,
-                r_hi=finder.CAP_R_HI, param2=HOUGH_P2_SOFT)
+                frame, m, C.PX_PER_MM)
         cv2.imshow("align_manual", render(frame, mats, m))
         # 非阻塞监听终端回车(触发一轮带数字输出的纠偏判定)
         if select.select([sys.stdin], [], [], 0)[0]:
