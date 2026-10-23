@@ -44,7 +44,8 @@ CONFIRM_CONF = 0.85      # 颜色确认门槛: 认错色=0 分, 认不出只是�
 CONFIRM_FRAMES = 3       # 连续 N 帧同色才认(滤反光闪色)
 FRAME_GAP = 0.05         # 采帧间隔 > 帧周期, 保证不是同一帧
 WAIT_COLOR_TIMEOUT = 30.0   # 单色等待超时(含换料等待), 超时跳过该色
-ADJUST_ON_GRAB = True    # 出手前对该物料做一次 move_v 微调(死区内自动跳过)
+GRIP_REACH_COMP = 15.0      # 夹爪补偿: 相机比夹爪靠外15mm(沿伸出方向),
+                            # 纠偏对准后夹爪差15mm → 抓取 Δ伸出 = dx_right + 15
 
 # ---- 跨帧后处理(移植沈航 common.py 思路: 确认→滤波→保持→消歧) ----
 TRACK_CONFIRM_FRAMES = 3   # 连续 N 帧命中才确认(confirmed)

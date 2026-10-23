@@ -219,9 +219,12 @@ def nearest(materials):
 
 
 def to_body(obj):
-    """图像偏差(mm) → 车体系 (dy_right, dx_fwd), 2x2 矩阵 config.IMG2BODY。"""
+    """图像偏差(像素) → 车体系 (dy_right, dx_fwd), 2x2 矩阵 config.IMG2BODY。
+
+    ⚠️ IMG2BODY 标定的是像素→车体映射(标定响应÷100mm), 必须喂像素 obj.dx/dy;
+    喂 mm 会差 PX_PER_MM 倍(实车 3 倍纠偏误差根因)。"""
     a, b, c, d = C.IMG2BODY
-    return a * obj.dx_mm + b * obj.dy_mm, c * obj.dx_mm + d * obj.dy_mm
+    return a * obj.dx + b * obj.dy, c * obj.dx + d * obj.dy
 
 
 def nearest_to_axis(materials):

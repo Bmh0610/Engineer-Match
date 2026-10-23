@@ -49,7 +49,7 @@ class StepGrab:
 
     @staticmethod
     def _to_body(obj):
-        """图像偏差(mm) → 车体系 (前, 右)。2x2 映射见 finder.to_body。"""
+        """图像偏差(像素) → 车体系 (前, 右)。见 finder.to_body(须喂像素)。"""
         dy_right, dx_fwd = finder.to_body(obj)
         return dx_fwd, dy_right
 
@@ -149,14 +149,17 @@ class StepGrab:
         if m is None:
             print(f"  !! {color} 超时未进抓取窗(含换料等待), 跳过该色(计时不中断) !!")
             return False
-        print(f"  确认 {color} conf={m.conf:.2f} 偏差=({m.dx_mm:+.1f},{m.dy_mm:+.1f})mm")
-        if C.ADJUST_ON_GRAB:
-            dx_fwd, dy_right = self._to_body(m)
-            if math.hypot(dx_fwd, dy_right) > C.ALIGN_TOL_MM:
-                print(f"  出手微调: 前{dx_fwd:+.1f} 右{dy_right:+.1f}mm")
-                self._move_v(dx_fwd, dy_right)
+        print(f"  确认 {color} conf={m.conf:.2f} 偏差px=({m.dx:+.1f},{m.dy:+.1f})")
+        # 按点控制机械臂: 物料中心偏差(相对主点) → 臂增量(底盘不参与抓取)
+        dy_right, dx_fwd = finder.to_body(m)   # 车体系 (右, 前) mm
         reach_c, h_c, theta_c = C.CENTER
-        self.move_arm(reach_c, C.H_GRAB, theta_c, label="下探取料")
+        d_reach = dy_right + C.GRIP_REACH_COMP   # 物料偏臂侧→多伸; 夹爪差15补偿
+        d_theta = (math.degrees(math.atan2(dx_fwd, reach_c))
+                   if reach_c > 0 else 0.0)      # 物料偏车头→逆时针(正)
+        print(f"  按点抓取 {color}: 物料 右{dy_right:+.1f} 前{dx_fwd:+.1f}mm → "
+              f"Δ伸出{d_reach:+.1f} Δ回转{d_theta:+.2f}°")
+        self.move_arm(reach_c + d_reach, C.H_GRAB, theta_c + d_theta,
+                      label="按点对位下探")
         self.grip(close=True)
         self.move_arm(reach_c, h_c, theta_c, label="抬升")
         self.move_arm(*C.CARRIER, label="移到载物盘上方")
