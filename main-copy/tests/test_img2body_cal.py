@@ -83,8 +83,16 @@ def main():
     cam.open()
     print(f"加载模型 {args.model} ...")
     backend = YOLOBackend(args.model)
-    print("物料放视野中央全程不动。三步采样(每步前打印要发的协议帧):")
-    print("  p0=基准 → 发『前进100』帧 → p1 → 发『右移100』帧 → p2 → 自动解算")
+    print("物料放视野中央全程不动。三步采样:")
+    print("  p0      : 不动, 直接回车采基准")
+    tx1 = frame(Mode.MOVE_V, 0, int(STEP), 0)
+    print(f"  p1 之前 : 发帧 {tx1.hex(' ').upper()}  (前进{STEP:.0f})")
+    tx2 = frame(Mode.MOVE_V, int(STEP), 0, 0)
+    print(f"  p2 之前 : 发帧 {tx2.hex(' ').upper()}  (右移{STEP:.0f})")
+    print("  发送命令模板(把 <帧hex> 换成上面对应帧, 去空格):")
+    print('  python3 -c "import serial; serial.Serial(\'/dev/ttyUSB0\',115200,'
+          "timeout=0.1).write(bytes.fromhex('<帧hex>'))\"")
+    print("  (窗口标题栏也会同步提示当前步骤)")
 
     steps = [(0, int(STEP), 0, "前进100"), (int(STEP), 0, 0, "右移100")]
     pts = []          # (cx, cy) ×3
@@ -116,6 +124,11 @@ def main():
                 break
             expect = pts[-1] if pts else None
             round_no += 1
+            if 1 <= len(pts) <= 2:
+                x, y, z, label = steps[len(pts) - 1]
+                txc = frame(Mode.MOVE_V, x, y, z)
+                print(f"  本步先发帧: {txc.hex(' ').upper()} ({label}), 停稳后再回车采样")
+                continue
             c = grab_center(backend, cam, args.conf, expect)
             if c is not None:
                 pts.append(c)
