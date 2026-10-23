@@ -31,6 +31,7 @@ class Material:
     dx_mm: float          # 像素偏差换算 mm
     dy_mm: float
     hough: tuple = None   # 霍夫精化命中时的 (cx, cy, r) 原图像素; None=未命中/未启用
+    ellipse: tuple = None  # 顶面椭圆定位命中: 原图坐标 ((cx,cy),(MA,ma),ang)
     confirmed: bool = False   # 跨帧后处理: 连续 N 帧确认通过
     holding: bool = False     # 跨帧后处理: 漏检保持中(输出上次圆心)
 
@@ -154,19 +155,41 @@ def refine_material(frame, m, px_per_mm=None):
 
 def refine_material_stages(frame, m, px_per_mm=None, param1=None, param2=None,
                            r_lo=None, r_hi=None, pick=None):
-    """refine_material 的带中间图版本(可视化测试台用), 返回 (是否命中, stages)。"""
-    hit, stages = hough_stages(frame, m.box, r_lo=r_lo, r_hi=r_hi,
-                               param1=param1, param2=param2, pick=pick)
-    if hit is None:
-        m.hough = None
-        return False, stages
+    """物料圆心精化, 三级定位链: 椭圆顶面(主) → 霍夫正圆(备) → bbox(兜底)。
+
+    透视下顶面投影为椭圆, fitEllipse 的中心即圆心投影, 对弱边缘/椭圆鲁棒;
+    霍夫正圆仅在顶面接近正圆时有效。返回 (是否命中非bbox, stages 含 source)。
+    就地更新 m 的 cx/cy/dx/dy/dx_mm/dy_mm 与 ellipse/hough 标记。
+    """
     px_per_mm = _warn_px_ratio(px_per_mm)
-    cx, cy, r = hit
-    acx, acy, dx, dy = _center_to_dev(cx, cy, frame.shape)
-    m.cx, m.cy, m.dx, m.dy = acx, acy, dx, dy
-    m.dx_mm, m.dy_mm = dx / px_per_mm, dy / px_per_mm
-    m.hough = hit
-    return True, stages
+    m.hough, m.ellipse = None, None
+    stages = {}
+
+    def _apply(cx, cy, source):
+        acx, acy, dx, dy = _center_to_dev(cx, cy, frame.shape)
+        m.cx, m.cy, m.dx, m.dy = acx, acy, dx, dy
+        m.dx_mm, m.dy_mm = dx / px_per_mm, dy / px_per_mm
+        stages["source"] = source
+        return True
+
+    # 1) 顶面椭圆(主)
+    center, est = fit_top_center(frame, m.box)
+    stages.update(est)
+    if center is not None:
+        stages["source"] = "ellipse"
+        m.ellipse = est.get("ellipse")   # 原图坐标 ((cx,cy),(MA,ma),ang)
+        return _apply(*center, "ellipse"), stages
+    # 2) 霍夫正圆(备)
+    hit, hough_stages = hough_stages(frame, m.box, r_lo=r_lo, r_hi=r_hi,
+                                     param1=param1, param2=param2, pick=pick)
+    stages.update({k: v for k, v in hough_stages.items() if k != "offset"})
+    if hit is not None:
+        stages["source"] = "hough"
+        m.hough = hit
+        return _apply(*hit, "hough"), stages
+    # 3) bbox 中心(兜底): 带透视系统偏差, 仅保流程不断
+    stages["source"] = "bbox"
+    return False, stages
 
 
 def find_materials(backend, frame, targets=None, conf=0.7, px_per_mm=1.0):
@@ -396,3 +419,70 @@ class MaterialTracker:
                                 hough=t["hough"], confirmed=t["confirmed"],
                                 holding=t["holding"]))
         return out
+
+
+# ---- 顶面椭圆定位(透视下顶面投影为椭圆, 霍夫正圆不适; 主定位法) ----
+
+def _otsu_in_mask(v, mask):
+    """mask 区域内的 Otsu 阈值(全图 Otsu 会被亮背景带偏)。"""
+    import numpy as np
+    vals = v[mask > 0]
+    if vals.size == 0:
+        return 128
+    hist = np.bincount(vals, minlength=256)[:256].astype(float)
+    total = vals.size
+    sum_all = float(np.dot(np.arange(256), hist))
+    sum_b, w_b, best_var, best_t = 0.0, 0.0, -1.0, 128
+    for t in range(256):
+        w_b += hist[t]
+        if w_b == 0:
+            continue
+        w_f = total - w_b
+        if w_f <= 0:
+            break
+        sum_b += t * hist[t]
+        m_b = sum_b / w_b
+        m_f = (sum_all - sum_b) / w_f
+        var = w_b * w_f * (m_b - m_f) ** 2
+        if var > best_var:
+            best_var, best_t = var, t
+    return best_t
+
+
+def fit_top_center(frame, box, pad=0.10):
+    """ROI 内两级分割出顶面 → fitEllipse → 顶面圆心投影 (cx, cy)。
+
+    两级: HSV 蓝色剪影(物料 vs 白背景) → 剪影内 V 通道中位数分层
+    (顶面受光较亮 vs 侧面较暗)。最大轮廓 fitEllipse, 椭圆中心即圆心。
+    返回 ((cx, cy), stages); 失败 (None, stages)。stages 供可视化。
+    """
+    x1, y1, x2, y2 = box
+    w, h = x2 - x1, y2 - y1
+    H, W = frame.shape[:2]
+    rx1, ry1 = max(int(x1 - w * pad), 0), max(int(y1 - h * pad), 0)
+    rx2, ry2 = min(int(x2 + w * pad), W), min(int(y2 + h * pad), H)
+    roi = frame[ry1:ry2, rx1:rx2]
+    stages = {"offset": (rx1, ry1)}
+    import numpy as np
+    if roi.size == 0:
+        return None, stages
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    blue = cv2.inRange(hsv, (90, 60, 40), (130, 255, 255))   # 蓝色剪影
+    stages["blue_mask"] = blue
+    if cv2.countNonZero(blue) < 200:
+        return None, stages
+    v = hsv[:, :, 2]
+    t = _otsu_in_mask(v, blue)            # 剪影内 Otsu: 分顶面(亮)/侧面(暗)
+    top = cv2.bitwise_and(cv2.threshold(v, t, 255, cv2.THRESH_BINARY)[1], blue)
+    top = cv2.morphologyEx(top, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    stages["top_mask"] = top
+    contours, _ = cv2.findContours(top, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None, stages
+    cnt = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(cnt) < 150 or len(cnt) < 5:
+        return None, stages
+    (cx, cy), (MA, ma), ang = cv2.fitEllipse(cnt)
+    stages["ellipse"] = ((cx + rx1, cy + ry1), (MA, ma), ang)   # 原图坐标
+    return (float(cx) + rx1, float(cy) + ry1), stages

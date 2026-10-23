@@ -39,10 +39,11 @@ def one_round(backend, cam, conf, round_no):
     if obj is None:
         print("  !! 未检出稳定物料(视野/物料确认), 再回车重试")
         return frame_img
-    hit, _st = finder.refine_material_stages(
+    hit, st = finder.refine_material_stages(
         frame_img, obj, C.PX_PER_MM, r_lo=finder.CAP_R_LO, r_hi=finder.CAP_R_HI,
         param2=HOUGH_P2_SOFT)
-    src = "霍夫顶面" if hit else "bbox中心(霍夫未命中)"
+    src = {"ellipse": "椭圆顶面", "hough": "霍夫正圆"}.get(
+        st.get("source"), "bbox中心(均未命中)") if hit else "bbox中心(均未命中)"
     dy_right, dx_fwd = finder.to_body(obj)
     residual = (dy_right ** 2 + dx_fwd ** 2) ** 0.5
     if residual <= C.ALIGN_TOL_MM:

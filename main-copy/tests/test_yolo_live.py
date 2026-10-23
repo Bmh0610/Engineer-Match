@@ -114,6 +114,12 @@ def render(frame, mats, nearest_m, undistort_view=False, tracker_on=False):
             dash_rect(disp, bx1, by1, bx2 - bx1, by2 - by1, color)
         ccx, ccy = mp(m.cx, m.cy)
         cv2.circle(disp, (int(ccx), int(ccy)), 4, color, -1)
+        if getattr(m, "ellipse", None):   # 顶面椭圆定位命中: 白椭圆+圆心
+            (ecx, ecy), (MA, ma), ang = m.ellipse
+            exx, eyy = mp(ecx, ecy)
+            cv2.ellipse(disp, (int(exx), int(eyy)),
+                        (max(int(MA / 2), 3), max(int(ma / 2), 3)), ang, 0, 360,
+                        (255, 255, 255), 1)
         if m.hough is not None:   # 霍夫精化命中: 白圈=传统 CV 找到的圆环
             hx, hy, hr = m.hough
             hxx, hyy = mp(hx, hy)
@@ -125,7 +131,8 @@ def render(frame, mats, nearest_m, undistort_view=False, tracker_on=False):
         label = (f"{m.color} {m.conf:.2f} | X{dy_right:+.1f} Y{dx_fwd:+.1f}mm "
                  f"(px {m.dx:+.0f},{m.dy:+.0f})"
                  + (" [near]" if m is nearest_m else "")
-                 + (" H" if m.hough is not None else "") + status)
+                 + (" E" if getattr(m, "ellipse", None) else " H" if m.hough is not None else "")
+                 + status)
         cv2.putText(disp, label, (bx1, max(14, by1 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     tag = "UNDISTORTED VIEW (u 切回原图)" if undistort_view else \
