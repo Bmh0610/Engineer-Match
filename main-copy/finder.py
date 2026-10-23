@@ -180,9 +180,9 @@ def refine_material_stages(frame, m, px_per_mm=None, param1=None, param2=None,
         m.ellipse = est.get("ellipse")   # 原图坐标 ((cx,cy),(MA,ma),ang)
         return _apply(*center, "ellipse"), stages
     # 2) 霍夫正圆(备)
-    hit, hough_stages = hough_stages(frame, m.box, r_lo=r_lo, r_hi=r_hi,
-                                     param1=param1, param2=param2, pick=pick)
-    stages.update({k: v for k, v in hough_stages.items() if k != "offset"})
+    hit, hst = hough_stages(frame, m.box, r_lo=r_lo, r_hi=r_hi,
+                            param1=param1, param2=param2, pick=pick)
+    stages.update({k: v for k, v in hst.items() if k != "offset"})
     if hit is not None:
         stages["source"] = "hough"
         m.hough = hit
@@ -470,22 +470,33 @@ def fit_top_center(frame, box, pad=0.10):
     if roi.size == 0:
         return None, stages
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    blue = cv2.inRange(hsv, (90, 60, 40), (130, 255, 255))   # 蓝色剪影
-    stages["blue_mask"] = blue
-    if cv2.countNonZero(blue) < 200:
+    s_ch, v_ch = hsv[:, :, 1], hsv[:, :, 2]
+    # 物料剪影(六色通用): 彩色(高饱和) 或 黑色(低亮度); 白纸背景两者皆非
+    body = cv2.inRange(hsv, (0, 60, 40), (180, 255, 255))      # 彩色: S≥60
+    body |= cv2.inRange(hsv, (0, 0, 0), (180, 255, 89))        # 黑/暗: V<90
+    body = cv2.morphologyEx(body, cv2.MORPH_OPEN,
+                            np.ones((3, 3), np.uint8))
+    stages["body_mask"] = body
+    if cv2.countNonZero(body) < 200:
         return None, stages
-    v = hsv[:, :, 2]
-    t = _otsu_in_mask(v, blue)            # 剪影内 Otsu: 分顶面(亮)/侧面(暗)
-    top = cv2.bitwise_and(cv2.threshold(v, t, 255, cv2.THRESH_BINARY)[1], blue)
+    t = _otsu_in_mask(v_ch, body)         # 剪影内 Otsu: 分顶面(亮)/侧面(暗)
+    top = cv2.bitwise_and(cv2.threshold(v_ch, t, 255, cv2.THRESH_BINARY)[1],
+                          body)
     top = cv2.morphologyEx(top, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     stages["top_mask"] = top
     contours, _ = cv2.findContours(top, cv2.RETR_EXTERNAL,
                                    cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None, stages
-    cnt = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(cnt) < 150 or len(cnt) < 5:
-        return None, stages
+    cnt = max(contours, key=cv2.contourArea) if contours else None
+    if cnt is None or cv2.contourArea(cnt) < 150 or len(cnt) < 5:
+        # 分层失败(黑色物料顶/侧同暗等): 回退整体剪影拟合(中心近似, 无分层精度)
+        contours, _ = cv2.findContours(body, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None, stages
+        cnt = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(cnt) < 150 or len(cnt) < 5:
+            return None, stages
+        stages["fallback_body"] = True
     (cx, cy), (MA, ma), ang = cv2.fitEllipse(cnt)
     stages["ellipse"] = ((cx + rx1, cy + ry1), (MA, ma), ang)   # 原图坐标
     return (float(cx) + rx1, float(cy) + ry1), stages
