@@ -1,8 +1,8 @@
 """机械臂全流程序列测试(参数原值, 0.1mm/0.1° 单位=预期×10, 绝对目标)。
 
 初始状态: 最高点(参数 Y=2090 = 预期 209mm)。两轮抓放:
-  伸出500 → 降1200 → 夹闭合(1300) → 抬2090 → 转600 → 降625 → 张开(放①)
-  → 抬2090 → 降580 → 夹闭合(抓②) → 抬2090 → 转回0(−60°) → 降1200 → 张开(放②)
+  伸出500 → 降1200 → 夹闭合(1300) → 抬2090 → 转-600 → 降610 → 张开(放①)
+  → 抬2090 → 降550 → 夹闭合(抓②) → 抬2090 → 转回600(+60°转回) → 降1200 → 张开(放②)
 每步回车执行, 等 0x0012/0x0013 完成回执(打印全部回执帧), Ctrl+C 退出。
 """
 import sys
@@ -16,15 +16,15 @@ STEPS = [
     ("下降离地 1200(预期120mm)", frame(Mode.MOVE_A, 500, 1200, 0), Mode.ACK_ARM),
     ("夹爪闭合抓取(1300)", frame(Mode.GRIPPER, 1300, 500), Mode.ACK_GRIPPER),
     ("抬回 2090(预期209mm)", frame(Mode.MOVE_A, 500, 2090, 0), Mode.ACK_ARM),
-    ("回转 600(预期+60°)", frame(Mode.MOVE_A, 500, 2090, 600), Mode.ACK_ARM),
-    ("降到 625(预期62.5mm)", frame(Mode.MOVE_A, 500, 625, 600), Mode.ACK_ARM),
-    ("夹爪张开放料①(800)", frame(Mode.GRIPPER, 800, 500), Mode.ACK_GRIPPER),
-    ("抬回 2090", frame(Mode.MOVE_A, 500, 2090, 600), Mode.ACK_ARM),
-    ("下降到 580(预期58mm)", frame(Mode.MOVE_A, 500, 580, 600), Mode.ACK_ARM),
-    ("夹爪闭合抓料②(1300)", frame(Mode.GRIPPER, 1300, 500), Mode.ACK_GRIPPER),
-    ("抬到 2090", frame(Mode.MOVE_A, 500, 2090, 600), Mode.ACK_ARM),
     ("回转到 -600(预期−60°)", frame(Mode.MOVE_A, 500, 2090, -600), Mode.ACK_ARM),
-    ("下降到 1200(预期120mm)", frame(Mode.MOVE_A, 500, 1200, -600), Mode.ACK_ARM),
+    ("降到 610(预期61mm)", frame(Mode.MOVE_A, 500, 610, -600), Mode.ACK_ARM),
+    ("夹爪张开放料①(800)", frame(Mode.GRIPPER, 800, 500), Mode.ACK_GRIPPER),
+    ("抬回 2090", frame(Mode.MOVE_A, 500, 2090, -600), Mode.ACK_ARM),
+    ("下降到 550(预期55mm)", frame(Mode.MOVE_A, 500, 550, -600), Mode.ACK_ARM),
+    ("夹爪闭合抓料②(1300)", frame(Mode.GRIPPER, 1300, 500), Mode.ACK_GRIPPER),
+    ("抬到 2090", frame(Mode.MOVE_A, 500, 2090, -600), Mode.ACK_ARM),
+    ("回转回 600(预期+60°, 转回来)", frame(Mode.MOVE_A, 500, 2090, 600), Mode.ACK_ARM),
+    ("下降到 1200(预期120mm)", frame(Mode.MOVE_A, 500, 1200, 600), Mode.ACK_ARM),
     ("夹爪松开放料②(800)", frame(Mode.GRIPPER, 800, 500), Mode.ACK_GRIPPER),
 ]
 
