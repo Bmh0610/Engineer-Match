@@ -88,14 +88,15 @@ class Link:
     # ---- 下行 ----
 
     def move_v(self, dx: float, dy: float, dz: float = 0.0):
-        """底盘: 参数原值直发(电控单位 0.1mm/0.1°, = 预期值×10, 调用方自行换算)。
-        车体系相对位移: dx 右, dy 前, dz 旋转°(顺时针/右转为负)。"""
+        """底盘(0x0001): 参数=预期原值(mm/°, 无×10! test_paotu 实车验证)。
+        车体系相对位移: dx 右, dy 前, dz 旋转°(顺时针/右转为负;
+        ⚠️ z 超出 ±180 会被固件 NormalizeAngle 归一化——z=-900 实测转 180°)。"""
         self.ser.write(frame(Mode.MOVE_V, round(dx), round(dy), round(dz)))
 
     def move_a(self, reach: float, height: float, theta: float = 0.0):
-        """机械臂: 参数原值直发(电控单位 0.1mm/0.1°, = 预期值×10, 调用方自行换算)。
+        """机械臂(0x0002): 参数=预期×10(0.1mm/0.1°, 电控样例与实测验证)。
         XYZ 为绝对目标: X 伸出距离(+x 与车同向), Y 离地高度(最高参数2090
-        = 预期209mm), Z 回转角°(逆时针/朝车头+; 绝对语义, 回 0 即回转回去)。"""
+        = 预期209mm), Z 回转角°(逆时针/朝车头+; 绝对语义, 回 0 即归位)。"""
         self.ser.write(frame(Mode.MOVE_A, round(reach), round(height), round(theta)))
 
     def gripper(self, angle_01deg: int, time_ms: int):

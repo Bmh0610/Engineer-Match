@@ -18,12 +18,12 @@ import config as C  # noqa: E402
 from grab import StepGrab  # noqa: E402
 from protocol import Link, Mode, frame  # noqa: E402
 
-# 底盘段: (label, x, y, z) 参数=预期×10
+# 底盘段: (label, x, y, z) 参数=预期原值(mm/°, 无×10)
 CHASSIS = [
-    ("前进 100mm", 0, 1000, 0),
-    ("右转 90°(顺时针)", 0, 0, -900),
-    ("前进 100mm", 0, 1000, 0),
-    ("右移 100mm", 1000, 0, 0),
+    ("前进 100mm", 0, 100, 0),
+    ("右转 90°(顺时针)", 0, 0, -90),
+    ("前进 100mm", 0, 100, 0),
+    ("右移 100mm", 100, 0, 0),
 ]
 
 # 臂段: (label, tx, ack) 绝对目标, 参数=预期×10
