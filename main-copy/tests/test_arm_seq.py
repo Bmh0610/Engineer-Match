@@ -23,8 +23,8 @@ STEPS = [
     ("下降到 580(预期58mm)", frame(Mode.MOVE_A, 500, 580, 600), Mode.ACK_ARM),
     ("夹爪闭合抓料②(1300)", frame(Mode.GRIPPER, 1300, 500), Mode.ACK_GRIPPER),
     ("抬到 2090", frame(Mode.MOVE_A, 500, 2090, 600), Mode.ACK_ARM),
-    ("回转回 0(预期−60°)", frame(Mode.MOVE_A, 500, 2090, 0), Mode.ACK_ARM),
-    ("下降到 1200(预期120mm)", frame(Mode.MOVE_A, 500, 1200, 0), Mode.ACK_ARM),
+    ("回转到 -600(预期−60°)", frame(Mode.MOVE_A, 500, 2090, -600), Mode.ACK_ARM),
+    ("下降到 1200(预期120mm)", frame(Mode.MOVE_A, 500, 1200, -600), Mode.ACK_ARM),
     ("夹爪松开放料②(800)", frame(Mode.GRIPPER, 800, 500), Mode.ACK_GRIPPER),
 ]
 
