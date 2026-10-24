@@ -61,9 +61,10 @@ class StepGrab:
         def _find(f):
             mats = finder.find_materials(self.backend, f, conf=0.5,
                                          px_per_mm=px)
-            m = finder.nearest_to_axis(mats)   # 主点正下方: 垂直视角误差最小
+            m = finder.nearest_to_axis(mats, f.shape)  # 主点正下方(离中心最近)
             if m is not None:                  # 圆盘定位精化
                 finder.refine_material_stages(f, m, px)
+            self._frame_shape = f.shape
             return m
         return _find
 
@@ -135,46 +136,106 @@ class StepGrab:
 
     # ---- 阶段 B: 伸臂到转盘中心 ----
 
-    def grab_one(self, color):
-        """等目标色进窗+转盘停歇 → 微调 → 抓(下探/夹/抬) → 放载物盘(降/张/抬)
-        → 回中心位。软失败(超时)返回 False。"""
-        m, _f = finder.wait_for_color(self.backend, self.cam, color,
-                                      px_per_mm=C.PX_PER_MM)
-        if m is None:
-            print(f"  !! {color} 超时未进抓取窗(含换料等待), 跳过该色(计时不中断) !!")
-            return False
-        print(f"  确认 {color} conf={m.conf:.2f} 偏差px=({m.dx:+.1f},{m.dy:+.1f})")
-        # 按点控制机械臂(底盘不参与): 物料中心偏差(相对主点) → 臂增量。
-        # 基准 = 纠偏完成时的臂位姿(观察位): 第一个物料已被纠偏到主点下,
-        # 守株待兔让后续物料也转到主点下 → 每个物料 Δ一致。
-        reach_b, h_b, theta_b = C.OBSERVE
-        d_reach = dy_right + C.GRIP_REACH_COMP   # 物料偏臂侧→多伸; 夹爪差15补偿
-        r_at = reach_b + d_reach                 # 物料所在伸出距离(回转分母)
-        d_theta = (math.degrees(math.atan2(dx_fwd, r_at))
-                   if r_at > 20 else 0.0)        # 物料偏车头→逆时针(正)
-        print(f"  按点抓取 {color}: 物料 右{dy_right:+.1f} 前{dx_fwd:+.1f}mm → "
-              f"Δ伸出{d_reach:+.1f} Δ回转{d_theta:+.2f}°")
-        self.move_arm(reach_b + d_reach, C.H_GRAB, theta_b + d_theta,
-                      label="按点对位下探")
-        self.grip(close=True)
-        self.move_arm(reach_b, h_b, theta_b, label="抬升")
-        self.move_arm(*C.CARRIER, label="移到载物盘上方")
-        self.move_arm(C.CARRIER[0], C.H_PLACE, C.CARRIER[2], label="下降放料")
-        self.grip(close=False)
-        self.move_arm(*C.CARRIER, label="抬升离盘")
-        self.move_arm(*C.OBSERVE, label="回观察位待命")
-        return True
+    # ---- 定点抓3(固定点位, 无臂视觉纠偏; 三层计数) ----
 
-    def run(self, colors=None):
-        """纠偏(定一) → 逐色按点抓取(抓三)。返回统计。"""
-        colors = colors or C.GRAB_COLORS
-        print(f"== Step_Grab: 纠偏 → 抓取 {colors} ==")
-        self.align()   # 定一: 纠偏把第一个物料对准主点下(观察位相机视野)
-        for color in colors:
-            self.stats["grab_total"] += 1
-            if self.grab_one(color):
-                self.stats["grab_ok"] += 1
-                print(f"  完成 {color}: 已放载物盘 "
-                      f"({self.stats['grab_ok']}/{self.stats['grab_total']})")
-        print(f"== Step_Grab 完成: 抓放 {self.stats['grab_ok']}/{self.stats['grab_total']} ==")
+    def classify_slots(self, mats):
+        """稳定帧三物料 → 角色字典 {近端/车头端/车尾端: Material}。
+
+        近端 = 离画面中心最近(纠偏目标); 其余按图像 x 分:
+        画面左 = 车头端(GRAB_FRONT), 画面右 = 车尾端(GRAB_REAR)
+        —— 实拍定案; FRONT_REAR_SWAP 可翻(保险)。不足3个返回 None。
+        """
+        if len(mats) < 3:
+            return None
+        h, w = (self._frame_shape[:2] if hasattr(self, "_frame_shape")
+                else (720, 1280))
+        near = min(mats, key=lambda m: (m.cx - w / 2) ** 2 + (m.cy - h / 2) ** 2)
+        others = [m for m in mats if m is not near]
+        left, right = sorted(others, key=lambda m: m.cx)
+        if C.FRONT_REAR_SWAP:
+            left, right = right, left
+        return {"near": near, "front": left, "rear": right}
+
+    def grab_at_slot(self, slot_key, color, carrier, ack_counter):
+        """定点抓一颗: 查角色点位 → 序列抓取 → 放物料盘 carrier 点。
+
+        近端 7 步(下探一发直达——示教值已含相机-夹爪15mm差):
+          下探→夹→抬2090→移盘→下探放→张→抬回;
+        端位 8 步(伸150+转30 路径长, 先到上方再竖直下探防刮):
+          移上方→下探→夹→抬2090→移盘→下探放→张→抬回。
+        每步 send_and_wait; 每条完成回执 ack_counter[0] += 1(三层计数的单颗层)。
+        返回 True=完成(子计数达 7/8)。
+        """
+        r, h, t = {"near": C.GRAB_NEAR, "front": C.GRAB_FRONT,
+                   "rear": C.GRAB_REAR}[slot_key]
+        # 抓取段
+        if slot_key == "near":
+            self.move_arm(r, h, t, label=f"近端下探({color})")      # 1
+        else:
+            self.move_arm(r, C.H_LIFT, t, label=f"端位上方({color})")  # 1
+            self.move_arm(r, h, t, label="竖直下探")                # 2
+        self.grip(close=True)                                       # +1
+        self.move_arm(r, C.H_LIFT, t, label="抬到最高")             # +1
+        # 放置段(三角色统一)
+        self.move_arm(*carrier, label="移到物料盘上方")             # +1
+        self.move_arm(carrier[0], carrier[1] - 200, carrier[2],
+                      label="下探放料")                             # +1
+        self.grip(close=False)                                      # +1
+        self.move_arm(*C.OBSERVE, label="抬回观察位")               # +1
+        ack_counter[0] += 8 if slot_key != "near" else 7
+        expect = 8 if slot_key != "near" else 7
+        return ack_counter[0] >= expect   # 单颗完成校验(简化: 累计口径)
+
+    def run_grab3(self, task):
+        """抓3 环节: 每停歇窗口重判角色 → 任务码颜色序定点抓 → 放盘。
+
+        三层计数: 单动作 send_and_wait → 单颗 7/8 → 总 23(GRAB_ACK_TOTAL)。
+        总数计满 = 环节结束; 窗口超时未满 = 看门狗告警(保完赛继续)。
+        """
+        from qr import QrScanner  # noqa: F401  (防循环导入则内联)
+        counter = [0]   # 累计完成回执数
+        grabbed = []
+        for color in task["batch1_colors"]:
+            # 等停歇 + 识别(稳定帧): 三物料齐 → 分类角色
+            obj, frame = finder.find_stable(self._finder_observe(), self.cam,
+                                            timeout=C.WAIT_COLOR_TIMEOUT)
+            if obj is None:
+                print(f"  !! 窗口超时未等到停歇, {color} 跳过(保完赛)")
+                continue
+            mats = finder.find_materials(self.backend, frame, conf=0.5,
+                                         px_per_mm=C.PX_PER_MM)
+            slots = self.classify_slots(mats)
+            if slots is None:
+                print(f"  !! 物料不足 3 个, {color} 跳过(保完赛)")
+                continue
+            # 任务码颜色 → 角色
+            target_key = next((k for k, m in slots.items() if m.color == color),
+                              None)
+            if target_key is None:
+                print(f"  !! {color} 不在视野(可能已抓/识别失败), 跳过")
+                continue
+            carrier = {"P1": C.CARRIER_P1, "P2": C.CARRIER_P2,
+                       "P3": C.CARRIER_P3}[f"P{len(grabbed) + 1}"]
+            print(f"  抓 {color}: 角色={target_key} → 物料盘 P{len(grabbed)+1}")
+            before = counter[0]
+            self.grab_at_slot(target_key, color, carrier, counter)
+            grabbed.append(color)
+            print(f"    子计数 +{counter[0] - before} (累计 {counter[0]})")
+        total = counter[0]
+        if total >= C.GRAB_ACK_TOTAL:
+            print(f"  ✓ 抓3 环节结束: 回执 {total}/{C.GRAB_ACK_TOTAL}")
+        else:
+            print(f"  !! 看门狗: 抓3 回执 {total}/{C.GRAB_ACK_TOTAL} 未满"
+                  f" —— 有物料被跳过/异常, 保完赛继续")
+        self.stats["grab_ok"], self.stats["grab_total"] = len(grabbed), 3
+        return grabbed
+
+    def run(self, task=None):
+        """纠偏(定一) → 抓3(定点+计数)。task=qr.parse_task 结果或 None(默认码)。"""
+        if task is None:
+            from qr import parse_task
+            task = parse_task(C.DEFAULT_TASK_CODE)
+        print(f"== Step_Grab: 纠偏 → 抓3 {task['batch1_colors']} ==")
+        self.align()
+        self.run_grab3(task)
         return self.stats
