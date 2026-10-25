@@ -8,11 +8,12 @@ SERIAL_PORT = "/dev/ttyUSB0"   # USB 直连; 排针备用=/dev/ttyTHS1
 CMD_TIMEOUT = 35.0             # 单命令单窗口(秒): 静默不重发(防双走)
 
 # ---- 相机 / 模型 ----
-CAMERA_ID_END = 0              # 末端相机(眼在手, 垂直向下); 编号随 USB 口变, 实测后只改这
-MODEL_PATH = "/home/popcorn/桌面/train yolov11/best.pt"   # 统一 10 类; .pt/.engine 自适应
+CAMERA_ID_END = 0             # 末端相机(眼在手, 垂直向下); 编号随 USB 口变, 实测后只改这
+                              # 新 Nano 实测(2026-10-25): 当前接的相机=/dev/video0
+MODEL_PATH = "/home/popcorn-car/main-copy/best.engine"   # Nano 部署用 .engine(TensorRT); 笔记本调试改 best.pt(需 ultralytics)
 
 # ---- 扫码(车左侧专用相机) ----
-CAMERA_ID_SCAN = 2            # 扫码相机设备号, 实测后只改这
+CAMERA_ID_SCAN = 0            # 扫码相机设备号, 实测后只改这(扫码/末端可先用同一颗调试)
 SCAN_TIMEOUT = 5.0            # 扫码超时(秒), 超时用兜底码
 DEFAULT_TASK_CODE = "123+123+123+123"   # 扫码失败兜底码(保完赛)
 
