@@ -20,7 +20,7 @@ from grab import StepGrab   # noqa: E402
 from protocol import Mode  # noqa: E402
 
 
-def drive_and_align(lk, cam, backend, visualize=False,
+def drive_and_align(lk, cam, backend, visualize=False, skip_start=True,
                     moves=((0, 0, -90, "右转90°"),
                            (-80, 0, 0, "左移80mm"),
                            (0, 1000, 0, "前进1000mm"))):
@@ -30,6 +30,14 @@ def drive_and_align(lk, cam, backend, visualize=False,
     z 旋转°(顺时针/右转为负); 逐条发 move_v 等完成码, 条间 2s。
     序列跑完后接 StepGrab 阶段A 连续纠偏, 返回 align 的收敛结果。
     """
+    if not skip_start:
+        from protocol import Mode as _M
+        print("等待一键启动(0x0020)...")
+        while True:
+            if any(f.mode == _M.BUTTON_START for f in lk.poll()):
+                print("  收到一键启动!")
+                break
+            time.sleep(0.05)
     for i, (x, y, z, label) in enumerate(moves, 1):
         print(f"-> {label}")
         lk.send_and_wait(lambda x=x, y=y, z=z: lk.move_v(x, y, z),
@@ -45,7 +53,8 @@ def main():
     ap = argparse.ArgumentParser(description="底盘运动+连续自动纠偏(实车)")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH, help="YOLO 权重(Nano 上 .engine 路径)")
-    ap.add_argument("--skip-start", action="store_true", help="跳过一键启动等待")
+    ap.add_argument("--wait-start", action="store_true",
+                    help="等待一键启动(默认跳过——电控 0x0020 未实现)")
     ap.add_argument("--visualize", action="store_true",
                     help="纠偏可视化(Nano 接屏/NoMachine 下用)")
     args = ap.parse_args()
@@ -61,7 +70,8 @@ def main():
     lk = Link(args.port)
 
     try:
-        drive_and_align(lk, cam, backend, visualize=args.visualize)
+        drive_and_align(lk, cam, backend, visualize=args.visualize,
+                       skip_start=not args.wait_start)
         print("测试完成")
     except RuntimeError as e:   # 通信静默等硬失败
         print(f"!! 中止(硬失败): {e}")
