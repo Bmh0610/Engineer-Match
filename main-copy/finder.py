@@ -132,15 +132,20 @@ def to_body(obj):
     return a * obj.dx + b * obj.dy, c * obj.dx + d * obj.dy
 
 
-def nearest_to_axis(materials):
-    """选离主点(相机光轴正下方)最近的物料: 垂直视角、畸变与透视偏移最小,
-    定位基准首选(多物料同框时, 边缘斜视角的物料误差可达数 mm~cm)。"""
+def nearest_to_axis(materials, frame_shape=None):
+    """选离主点(或画面中心)最近的物料: 垂直视角、透视偏移最小, 定位基准首选。
+
+    与安装方向无关(相机转180°重装后依然正确——不依赖'画面最下=离车最近')。"""
     if not materials:
         return None
+    px, py = 0.0, 0.0
     if _CALIB:
         px, py = _CALIB.principal_point()
+    elif frame_shape is not None:
+        h, w = frame_shape[:2]
+        px, py = w / 2, h / 2
     else:
-        return nearest(materials)   # 无内参无法定主点, 回退画面最下
+        return nearest(materials)   # 无基准可用, 回退画面最下
     return min(materials, key=lambda m: (m.cx - px) ** 2 + (m.cy - py) ** 2)
 
 
