@@ -96,7 +96,7 @@ class Step4_Grab3(State):
     """抓3: 每停歇窗口重判角色, 任务码颜色序定点抓放(总回执 23 判结束)。"""
 
     def execute(self, ctx):
-        print("== Step4 抓3(固定点位, 计数23) ==")
+        print("== Step4 抓3(先到判色位→固定点位抓放, 计数23) ==")
         ctx.grab.run_grab3(ctx.task)
         ctx.current_state = Step5_Done()
 

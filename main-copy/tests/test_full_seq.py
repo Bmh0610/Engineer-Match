@@ -28,6 +28,7 @@ CHASSIS = [
 
 # 臂段: (label, tx, ack) 绝对目标, 参数=预期×10
 ARM = [
+    ("判色位: 伸出55mm(高2090)", frame(Mode.MOVE_A, 550, 2090, 0), Mode.ACK_ARM),
     ("伸出 150mm(高2090)", frame(Mode.MOVE_A, 1500, 2090, 0), Mode.ACK_ARM),
     ("顺转 30°(参数-300)", frame(Mode.MOVE_A, 1500, 2090, -300), Mode.ACK_ARM),
     ("下降离地 120mm(参数1200)", frame(Mode.MOVE_A, 1500, 1200, -300), Mode.ACK_ARM),

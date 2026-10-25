@@ -186,15 +186,19 @@ class StepGrab:
         expect = 8 if slot_key != "near" else 7
         return ack_counter[0] >= expect   # 单颗完成校验(简化: 累计口径)
 
+    def goto_scan_pos(self):
+        """到判色位(纠偏后伸 X+55mm+最高): 视野覆盖三物料, 判颜色/分类在此。"""
+        self.move_arm(*C.SCAN_POS, label="到判色位")
+
     def run_grab3(self, task):
-        """抓3 环节: 每停歇窗口重判角色 → 任务码颜色序定点抓 → 放盘。
+        """抓3 环节: 先到判色位(看全三物料) → 每停歇窗口重判角色 → 任务码颜色序定点抓 → 放盘。
 
         三层计数: 单动作 send_and_wait → 单颗 7/8 → 总 23(GRAB_ACK_TOTAL)。
         总数计满 = 环节结束; 窗口超时未满 = 看门狗告警(保完赛继续)。
         """
-        from qr import QrScanner  # noqa: F401  (防循环导入则内联)
         counter = [0]   # 累计完成回执数
         grabbed = []
+        self.goto_scan_pos()   # 先到判色位: 视野看全三物料再判颜色
         for color in task["batch1_colors"]:
             # 等停歇 + 识别(稳定帧): 三物料齐 → 分类角色
             obj, frame = finder.find_stable(self._finder_observe(), self.cam,
