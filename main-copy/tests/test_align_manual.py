@@ -33,7 +33,7 @@ def one_round(backend, cam, conf, round_no):
     print("  检测中(取稳定帧, 最多 2s)...", flush=True)
     obj, frame_img = finder.find_stable(
         lambda f: finder.nearest_to_axis(finder.find_materials(
-            backend, f, conf=conf, px_per_mm=C.PX_PER_MM)),
+            backend, f, conf=conf, px_per_mm=C.PX_PER_MM), f.shape),
         cam, timeout=2.0)
     if obj is None:
         print("  !! 未检出稳定物料(视野/物料确认), 再回车重试")
@@ -87,7 +87,7 @@ def main():
         # 每帧实时检测叠加(YOLO框+霍夫顶面圆+主点十字)
         mats = finder.find_materials(backend, frame, conf=args.conf,
                                      px_per_mm=C.PX_PER_MM)
-        m = finder.nearest_to_axis(mats)
+        m = finder.nearest_to_axis(mats, frame.shape)
         if m is not None:
             finder.refine_material_stages(
                 frame, m, C.PX_PER_MM)
