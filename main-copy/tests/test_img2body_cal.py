@@ -48,7 +48,7 @@ def solve_img2body(d_right_pix, d_fwd_pix, dist):
 
 def main():
     ap = argparse.ArgumentParser(description="IMG2BODY 标定(手动平移点击版)")
-    ap.add_argument("--cam", type=int, default=2)
+    ap.add_argument("--cam", type=int, default=C.CAMERA_ID_END)   # 默认=config; 换设备号用 --cam N
     ap.add_argument("--model", default=C.MODEL_PATH)
     ap.add_argument("--conf", type=float, default=0.5)
     ap.add_argument("--dist", type=float, default=100.0,

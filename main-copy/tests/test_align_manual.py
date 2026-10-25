@@ -60,7 +60,7 @@ def one_round(backend, cam, conf, round_no):
 
 def main():
     ap = argparse.ArgumentParser(description="纠偏手动执行测试(回车触发单轮)")
-    ap.add_argument("--cam", type=int, default=2)
+    ap.add_argument("--cam", type=int, default=C.CAMERA_ID_END)   # 默认=config; 换设备号用 --cam N
     ap.add_argument("--model", default=C.MODEL_PATH)
     ap.add_argument("--conf", type=float, default=0.5)
     args = ap.parse_args()

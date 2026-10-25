@@ -95,7 +95,7 @@ def render(frame, mats, nearest_m, undistort_view=False, tracker_on=False):
 
 def main():
     ap = argparse.ArgumentParser(description="YOLO 实时画面测试台")
-    ap.add_argument("--cam", type=int, default=2)
+    ap.add_argument("--cam", type=int, default=C.CAMERA_ID_END)   # 默认=config; 换设备号用 --cam N
     ap.add_argument("--conf", type=float, default=0.5)
     ap.add_argument("--model", default=C.MODEL_PATH)
     args = ap.parse_args()
