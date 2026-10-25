@@ -2,7 +2,7 @@
 
 前提: 臂已手动摆到观察位(末端相机看到离车最近的物料), 车前方有物料可纠偏。
 用法:
-  python3 tests/test_drive_align.py --model ~/main-copy/best.engine --skip-start
+  python3 tests/test_drive_align.py --model ~/main-copy/vision/best.engine --skip-start
   python3 tests/test_drive_align.py --model ... --visualize   # 纠偏可视化(接屏/NoMachine)
 流程: 逐条动作(等 0x0011, 条间 2s) → 连续自动纠偏(算偏差→发帧→等 0x0011
 → 再看, ≤3mm 结束, ≤4 轮, 超时带误差继续保完赛) —— 全程无需手动发帧。

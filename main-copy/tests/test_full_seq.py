@@ -74,7 +74,7 @@ def run_step(lk, label, tx, ack, total, i):
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="底盘+纠偏+机械臂 全流程联调")
-    ap.add_argument("--model", default="/home/ubuntu/main-copy/best.engine")
+    ap.add_argument("--model", default=C.MODEL_PATH)
     args = ap.parse_args()
 
     from vision.camera import Camera

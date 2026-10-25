@@ -24,11 +24,10 @@ import numpy as np
 
 from vision.camera import Camera
 
-try:
-    import calib as _calib_mod
-    _CAL = _calib_mod.load()
-except Exception:
-    _CAL = None
+import config as _C
+import calib as _calib_mod
+# 与 finder 同口径: 无畸变镜头(USE_INTRINSICS=False)不加载内参/不去畸变
+_CAL = _calib_mod.load() if _C.USE_INTRINSICS else None
 
 
 class State:
@@ -45,6 +44,8 @@ def on_mouse(event, x, y, flags, st):
 def main():
     ap = argparse.ArgumentParser(description="像素比例尺实测(px/mm, 手动两点测距)")
     ap.add_argument("--cam", type=int, default=0)
+    ap.add_argument("--ring", action="store_true",
+                    help="环面标定模式: 打印 PX_PER_MM_RING(在环观测位姿下跑)")
     args = ap.parse_args()
 
     cam = Camera(args.cam, "ratio")
@@ -120,7 +121,9 @@ def main():
         print(f"\n== 结果 ==\npx_per_mm = {mean:.3f} ± {std:.3f}  (n={len(samples)})")
         if std / mean > 0.05:
             print("!! 离散度 >5%: 各次测量差异大(点的位置/长度输入有误或高度变了), 建议重测")
-        print(f"填入 config.py:  PX_PER_MM = {mean:.3f}")
+        name = "PX_PER_MM_RING" if args.ring else "PX_PER_MM"
+        where = "config 环放置段" if args.ring else "config 标定段"
+        print(f"填入 {where}:  {name} = {mean:.3f}")
         if _CAL is not None:
             print(f"交叉验证: 相机离面高度mm 应 ≈ fx / {mean:.3f} = {_CAL.fx / mean:.0f}")
     else:

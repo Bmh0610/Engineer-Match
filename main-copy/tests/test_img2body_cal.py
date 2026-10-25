@@ -53,6 +53,8 @@ def main():
     ap.add_argument("--conf", type=float, default=0.5)
     ap.add_argument("--dist", type=float, default=100.0,
                     help="每组手动平移的距离 mm(尺量)")
+    ap.add_argument("--ring", action="store_true",
+                    help="环面标定模式: 打印 IMG2BODY_RING(在环观测位姿下跑)")
     args = ap.parse_args()
     D = args.dist
 
@@ -127,8 +129,10 @@ def main():
         return
     (a, b, c, d), res = solve_img2body(st["done"]["right"], st["done"]["fwd"], D)
     print(f"\n自检最大残差 {res:.2f}mm (应 <2mm; 大=点的位置/挪动距离不准)")
-    print("\n复制进 config.py:")
-    print(f"IMG2BODY = ({a:.4f}, {b:.4f}, {c:.4f}, {d:.4f})")
+    name = "IMG2BODY_RING" if args.ring else "IMG2BODY"
+    where = ("config 环放置段(IMG2BODY_RING)" if args.ring else "config 标定段")
+    print(f"\n复制进 {where}:")
+    print(f"{name} = ({a:.4f}, {b:.4f}, {c:.4f}, {d:.4f})")
     cv2.destroyAllWindows()
 
 

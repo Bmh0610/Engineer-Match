@@ -7,8 +7,10 @@
 """
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "/home/ubuntu/main-copy")
+BASE = str(Path(__file__).resolve().parent.parent)   # main-copy 根(双端通用)
+sys.path.insert(0, BASE)
 from communication.protocol import Link, Mode, frame  # noqa: E402
 
 STEPS = [

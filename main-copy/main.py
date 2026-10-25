@@ -1,4 +1,4 @@
-"""main-copy 主状态机: 一键启动 → 行程①(扫码) → 行程② → 纠偏 → 抓3 → 统计。
+"""main-copy 主状态机: 一键启动 → 行程①(扫码) → 行程② → 纠偏 → 抓3 → [环放置] → 统计。
 
 State 模式(gcxl 同款): State.execute(ctx) 推进 ctx.current_state。
 行程 = drive(moves) 通用函数(动作序列=函数默认参数, 条间 2s);
@@ -7,6 +7,9 @@ State 模式(gcxl 同款): State.execute(ctx) 推进 ctx.current_state。
 用法:
   实车:   python3 main.py --skip-start    # 电控 0x0020 未实现, 默认直跑
   待回执: python3 main.py                 # 等一键启动回执
+  环放置: python3 main.py --skip-start --place-ring
+          # 抓3后接环放置(⚠️车须已在粗加工区; 运动段行程接入前的联调用;
+          # 环面标定未填 config 时自动跳过, 料留盘上)
 """
 import argparse
 import sys
@@ -97,23 +100,39 @@ class Step4_Grab3(State):
 
     def execute(self, ctx):
         print("== Step4 抓3(先到判色位→固定点位抓放, 计数23) ==")
-        ctx.grab.run_grab3(ctx.task)
-        ctx.current_state = Step5_Done()
+        ctx.placed_colors = ctx.grab.run_grab3(ctx.task)
+        ctx.current_state = Step5_PlaceRing() if ctx.place_ring else Step6_Done()
 
 
-class Step5_Done(State):
+class Step5_PlaceRing(State):
+    """环放置(粗加工区, 定一式): 对画面中间环整车纠偏 → 数字查位 盘→环 放3。
+
+    ⚠️ 前提=车已到粗加工区环前; 运动段行程接入前, --place-ring 只在
+    车被人工摆到位(或实车联调)时用。未见环/标定未填/环号超3都跳过, 料留盘上。
+    """
+
     def execute(self, ctx):
-        s = ctx.grab.stats
-        print(f"== 完成: 抓 {s['grab_ok']}/{s['grab_total']} ==")
+        print("== Step5 环放置(粗加工区, 定一+查表, 计数25) ==")
+        ctx.place.run_place3(ctx.task, ctx.placed_colors)
+        ctx.current_state = Step6_Done()
+
+
+class Step6_Done(State):
+    def execute(self, ctx):
+        s, p = ctx.grab.stats, ctx.place.stats
+        extra = f" 放 {p['place_ok']}/{p['place_total']}" if ctx.place_ring else ""
+        print(f"== 完成: 抓 {s['grab_ok']}/{s['grab_total']}{extra} ==")
         ctx.current_state = None
 
 
 class Context:
-    def __init__(self, lk, grab, scanner, scan_cam, skip_start=False):
-        self.lk, self.grab = lk, grab
+    def __init__(self, lk, grab, place, scanner, scan_cam,
+                 skip_start=False, place_ring=False):
+        self.lk, self.grab, self.place = lk, grab, place
         self.scanner, self.scan_cam = scanner, scan_cam
-        self.skip_start = skip_start
+        self.skip_start, self.place_ring = skip_start, place_ring
         self.task = None
+        self.placed_colors = None
         self.current_state = Step0_WaitStart()
 
     def run(self):
@@ -124,14 +143,19 @@ class Context:
 def main():
     ap = argparse.ArgumentParser(description="智能搬运主状态机")
     ap.add_argument("--port", default=C.SERIAL_PORT)
-    ap.add_argument("--model", default="/home/ubuntu/main-copy/best.engine")
+    ap.add_argument("--model", default=C.MODEL_PATH)
     ap.add_argument("--skip-start", action="store_true",
                     help="跳过一键启动等待(电控 0x0020 未实现时用)")
+    ap.add_argument("--place-ring", action="store_true",
+                    help="抓3后接环放置(前提: 车已到粗加工区)")
+    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
+                    help="环检测模型(与物料模型可拆分)")
     args = ap.parse_args()
 
     from vision.camera import Camera
     from vision.detect import YOLOBackend
     from task.grab import StepGrab
+    from task.ring import StepRing
     from communication.protocol import Link, Mode
     from vision.qr import QrScanner
 
@@ -141,10 +165,13 @@ def main():
     end_cam.open()
     print(f"加载模型 {args.model} ...")
     backend = YOLOBackend(args.model)
+    backend_ring = YOLOBackend(args.model_ring) if args.place_ring else None
     lk = Link(args.port)
 
     grab = StepGrab(lk, end_cam, backend)
-    ctx = Context(lk, grab, QrScanner(), scan_cam, skip_start=args.skip_start)
+    place = StepRing(lk, end_cam, backend_ring)
+    ctx = Context(lk, grab, place, QrScanner(), scan_cam,
+                  skip_start=args.skip_start, place_ring=args.place_ring)
     try:
         ctx.run()
     except RuntimeError as e:   # 硬失败: 通信静默(不重发策略)
