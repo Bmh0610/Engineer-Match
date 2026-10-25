@@ -82,7 +82,19 @@ def decode(buf: bytearray):
 
 class Link:
     def __init__(self, port: str, baudrate: int = 115200):
-        self.ser = serial.Serial(port, baudrate, timeout=0.05)
+        try:
+            self.ser = serial.Serial(port, baudrate, timeout=0.05)
+        except serial.SerialException as e:
+            import os
+            if not os.path.exists(port):
+                raise RuntimeError(
+                    f"{port} 不存在: 板上 CH340 桥未枚举——整车断电重上电/拔插"
+                    f" Nano 侧 USB 线后重试 (ls {port}* 确认)") from e
+            if "Permission" in str(e):
+                raise RuntimeError(
+                    f"{port} 无权限: sudo chmod 666 {port} 临时开, "
+                    f"或 usermod -aG dialout 后重新登录(永久)") from e
+            raise
         self._rx = bytearray()
 
     # ---- 下行 ----
