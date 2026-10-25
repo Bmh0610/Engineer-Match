@@ -16,7 +16,7 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
 import config as C       # noqa: E402
-from protocol import Mode  # noqa: E402
+from communication.protocol import Mode  # noqa: E402
 
 
 def drive_route(lk,
@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--port", default=C.SERIAL_PORT)
     args = ap.parse_args()
 
-    from protocol import Link
+    from communication.protocol import Link
     lk = Link(args.port)
     input("确认: 已清场 + 已按一键启动。回车开始跑图, Ctrl+C 中止...")
     try:

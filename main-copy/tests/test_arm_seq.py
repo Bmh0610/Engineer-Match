@@ -9,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, "/home/ubuntu/main-copy")
-from protocol import Link, Mode, frame  # noqa: E402
+from communication.protocol import Link, Mode, frame  # noqa: E402
 
 STEPS = [
     ("伸出 500(预期50mm)", frame(Mode.MOVE_A, 500, 2090, 0), Mode.ACK_ARM),

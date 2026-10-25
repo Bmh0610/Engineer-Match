@@ -26,7 +26,7 @@ sys.path.insert(0, str(BASE))
 import cv2   # noqa: E402
 
 import config as C    # noqa: E402
-import finder         # noqa: E402
+from vision import finder
 from test_yolo_live import render   # noqa: E402
 
 
@@ -56,8 +56,8 @@ def main():
     args = ap.parse_args()
     D = args.dist
 
-    from camera import Camera
-    from detect import YOLOBackend
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
 
     cam = Camera(args.cam, "cal")
     cam.open()

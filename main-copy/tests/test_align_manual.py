@@ -21,8 +21,8 @@ os.environ.setdefault("QT_LOGGING_RULES", "*.debug=false;*.warning=false")
 import cv2   # noqa: E402
 
 import config as C    # noqa: E402
-import finder         # noqa: E402
-from protocol import Mode, frame   # noqa: E402
+from vision import finder
+from communication.protocol import Mode, frame   # noqa: E402
 from test_yolo_live import render   # noqa: E402  复用主画面渲染(同目录)
 
 
@@ -65,8 +65,8 @@ def main():
     ap.add_argument("--conf", type=float, default=0.5)
     args = ap.parse_args()
 
-    from camera import Camera
-    from detect import YOLOBackend
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
 
     cam = Camera(args.cam, "align_manual")
     cam.open()

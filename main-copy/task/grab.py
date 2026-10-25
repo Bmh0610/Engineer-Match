@@ -18,8 +18,8 @@ import math
 import time
 
 import config as C
-import finder
-from protocol import Mode
+from vision import finder
+from communication.protocol import Mode
 
 
 class StepGrab:
@@ -237,7 +237,7 @@ class StepGrab:
     def run(self, task=None):
         """纠偏(定一) → 抓3(定点+计数)。task=qr.parse_task 结果或 None(默认码)。"""
         if task is None:
-            from qr import parse_task
+            from vision.qr import parse_task
             task = parse_task(C.DEFAULT_TASK_CODE)
         print(f"== Step_Grab: 纠偏 → 抓3 {task['batch1_colors']} ==")
         self.align()

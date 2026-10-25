@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import cv2
 
-import calib
+from tools import calib
 import config as C
 
 _CALIB = calib.load() if C.USE_INTRINSICS else None

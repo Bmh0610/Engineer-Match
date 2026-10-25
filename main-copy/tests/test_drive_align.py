@@ -16,8 +16,8 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
 import config as C       # noqa: E402
-from grab import StepGrab   # noqa: E402
-from protocol import Mode  # noqa: E402
+from task.grab import StepGrab   # noqa: E402
+from communication.protocol import Mode  # noqa: E402
 
 
 def drive_and_align(lk, cam, backend, visualize=False, skip_start=True,
@@ -31,7 +31,7 @@ def drive_and_align(lk, cam, backend, visualize=False, skip_start=True,
     序列跑完后接 StepGrab 阶段A 连续纠偏, 返回 align 的收敛结果。
     """
     if not skip_start:
-        from protocol import Mode as _M
+        from communication.protocol import Mode as _M
         print("等待一键启动(0x0020)...")
         while True:
             if any(f.mode == _M.BUTTON_START for f in lk.poll()):
@@ -59,9 +59,9 @@ def main():
                     help="纠偏可视化(Nano 接屏/NoMachine 下用)")
     args = ap.parse_args()
 
-    from camera import Camera
-    from detect import YOLOBackend
-    from protocol import Link
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
+    from communication.protocol import Link
 
     cam = Camera(C.CAMERA_ID_END, "end")
     cam.open()

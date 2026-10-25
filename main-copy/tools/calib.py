@@ -1,6 +1,6 @@
 """末端相机内参标定结果的载入与使用(张正友法, tools/calib_intr.py 生成)。
 
-vision/calib_end.yaml: fx, fy, cx, cy, dist[k1,k2,p1,p2,k3], rms。用途:
+tools/calib_end.yaml: fx, fy, cx, cy, dist[k1,k2,p1,p2,k3], rms。用途:
   ① principal_point 主点替代"画面中心=光轴"假设(当前系统偏差源)
   ② undistort_point 检测点去畸变(边缘目标几像素→几毫米修正)
      —— YOLO 输入帧保持原图(同训练分布), 只修检测出的点
@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import yaml
 
-CALIB_DIR = Path(__file__).resolve().parent / "vision"
+CALIB_DIR = Path(__file__).resolve().parent   # 与本文件同目录
 
 
 class Calib:

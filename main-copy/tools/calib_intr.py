@@ -5,7 +5,7 @@
       空格存图(角点找全才存), 采 15-20 张: 棋盘占画面 1/3-2/3、±30-45° 倾斜
       姿态多样、平移覆盖四角(带倾斜也避摩尔纹), 每姿态停稳再拍。
 标定: python3 tools/calib_intr.py --calibrate --dir /tmp/calib --square 20.0
-      RMS<0.8 存 vision/calib_end.yaml; 0.8-1.5 存并警告; >1.5 拒存
+      RMS<0.8 存 tools/calib_end.yaml; 0.8-1.5 存并警告; >1.5 拒存
       (可 --force 强制保存); fx 前后半稳定性差异>40% 同样拒存。
 验证: python3 tools/calib_intr.py --verify --cam 0
       画面中心(蓝) vs 标定主点(红)双十字; 右图里的直线应该真的直。
@@ -24,10 +24,10 @@ import cv2
 import numpy as np
 import yaml
 
-from camera import Camera
+from vision.camera import Camera
 
 COMMON_PATTERNS = [(9, 6), (8, 6), (10, 7), (7, 5), (11, 8), (6, 5)]
-VISION_DIR = BASE / "vision"
+VISION_DIR = BASE / "tools"
 
 
 def detect(gray, w, h):
@@ -208,7 +208,7 @@ def run_verify(args):
     import calib
     c = calib.load()
     if c is None:
-        sys.exit("无 vision/calib_end.yaml, 先 --calibrate")
+        sys.exit("无 tools/calib_end.yaml, 先 --calibrate")
     cam = Camera(args.cam, "calib")
     cam.open()
     print(f"RMS={c.rms:.2f}px | 左=原图 右=去畸变 | 蓝十字=画面中心 "

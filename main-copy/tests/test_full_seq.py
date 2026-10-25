@@ -16,8 +16,8 @@ BASE = str(Path(__file__).resolve().parent.parent)   # main-copy 根(双端通�
 sys.path.insert(0, BASE)
 
 import config as C  # noqa: E402
-from grab import StepGrab  # noqa: E402
-from protocol import Link, Mode, frame  # noqa: E402
+from task.grab import StepGrab  # noqa: E402
+from communication.protocol import Link, Mode, frame  # noqa: E402
 
 # 底盘段: (label, x, y, z) 参数=预期原值(mm/°, 无×10)
 CHASSIS = [
@@ -77,8 +77,8 @@ def main():
     ap.add_argument("--model", default="/home/ubuntu/main-copy/best.engine")
     args = ap.parse_args()
 
-    from camera import Camera
-    from detect import YOLOBackend
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
 
     cam = Camera(C.CAMERA_ID_END, "end")
     cam.open()

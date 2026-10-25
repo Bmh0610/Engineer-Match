@@ -13,7 +13,7 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
 import config as C       # noqa: E402
-from protocol import Mode  # noqa: E402
+from communication.protocol import Mode  # noqa: E402
 
 MOVES = [   # (x, y, z, 说明) 车体系: x 右(臂侧) y 前 z 旋转°(顺时针/右转为负)
     (0, 0, -90, "右转90°"),
@@ -27,7 +27,7 @@ def main():
     ap.add_argument("--port", default=C.SERIAL_PORT)
     args = ap.parse_args()
 
-    from protocol import Link
+    from communication.protocol import Link
     lk = Link(args.port)
     print(f"串口 {args.port} 已连。共 {len(MOVES)} 步, 每步按回车执行。")
     for i, (x, y, z, label) in enumerate(MOVES, 1):

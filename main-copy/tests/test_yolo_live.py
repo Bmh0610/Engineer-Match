@@ -14,7 +14,7 @@ sys.path.insert(0, str(BASE))
 import cv2   # noqa: E402
 
 import config as C    # noqa: E402
-import finder         # noqa: E402
+from vision import finder
 
 BOX_BGR = {"red": (0, 0, 255), "green": (0, 255, 0), "blue": (255, 0, 0),
            "yellow": (0, 255, 255), "light_blue": (255, 255, 0),
@@ -100,8 +100,8 @@ def main():
     ap.add_argument("--model", default=C.MODEL_PATH)
     args = ap.parse_args()
 
-    from camera import Camera
-    from detect import YOLOBackend
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
 
     cam = Camera(args.cam, "yolo_live")
     cam.open()

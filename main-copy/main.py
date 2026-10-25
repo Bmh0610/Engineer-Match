@@ -63,7 +63,7 @@ class Step1_ScanLeg(State):
         drive(ctx.lk, ((0, 100, 0, "前进100mm"),))
         task = ctx.scanner.scan_from_camera(ctx.scan_cam, C.SCAN_TIMEOUT)
         if task is None:
-            from qr import parse_task
+            from vision.qr import parse_task
             task = parse_task(C.DEFAULT_TASK_CODE)
             print(f"  !! 扫码超时, 用兜底码 {C.DEFAULT_TASK_CODE}")
         ctx.task = task
@@ -129,11 +129,11 @@ def main():
                     help="跳过一键启动等待(电控 0x0020 未实现时用)")
     args = ap.parse_args()
 
-    from camera import Camera
-    from detect import YOLOBackend
-    from grab import StepGrab
-    from protocol import Link, Mode
-    from qr import QrScanner
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
+    from task.grab import StepGrab
+    from communication.protocol import Link, Mode
+    from vision.qr import QrScanner
 
     scan_cam = Camera(C.CAMERA_ID_SCAN, "scan")
     scan_cam.open()

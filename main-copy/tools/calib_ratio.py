@@ -22,7 +22,7 @@ sys.path.insert(0, str(BASE))
 import cv2
 import numpy as np
 
-from camera import Camera
+from vision.camera import Camera
 
 try:
     import calib as _calib_mod
