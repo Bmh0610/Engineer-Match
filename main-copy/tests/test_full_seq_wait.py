@@ -426,6 +426,7 @@ def main():
 
     task = None
     if args.skip_to == "start":
+        leg_move(lk, 150, 0, 0, "右移150(起步对位)")
         leg_move(lk, 0, 1000, 0, "前进1000(到扫码位)")
         task = scan_step(cam)
         leg_move(lk, 0, 0, -90, "顺时针转90")
