@@ -33,7 +33,7 @@ from task.ring import find_rings  # noqa: E402
 ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
             Mode.ACK_GRIPPER: "0x0013夹爪"}
 
-# ---- 盘上槽位与取放(2026-10-27 实测三点位; 爪子三段口径, 与 test_full_seq 同款) ----
+# ---- 盘上槽位与取放 ----
 
 def carrier_pose(slot, work=True):
     """盘上槽位位姿: slot=0/1/2 → P1中间/P2车头/P3车尾; work=工作高, 否则悬停(H_LIFT)。"""
@@ -41,28 +41,20 @@ def carrier_pose(slot, work=True):
     return (p[0], p[1] if work else float(C.H_LIFT), p[2])
 
 
-def grip_to(lk, ang_t, label):
-    ang, t = ang_t
-    run_step(lk, f"{label}({ang})", frame(Mode.GRIPPER, ang, t), Mode.ACK_GRIPPER)
-
-
 def place_to_carrier(lk, slot):
-    """盘上放置: 悬停 → 开1225(松一档) → 下探 → 开1150(放料) → 升回观察位 → 开800。"""
+    """盘上放置: 悬停 → 下探 → 张800 → 升回观察位。"""
     arm(lk, "到盘槽位上方", carrier_pose(slot, work=False))
-    grip_to(lk, C.GRIP_OPEN_WIDE, "盘上悬停松一档")
     arm(lk, "下探放料", carrier_pose(slot, work=True))
-    grip_to(lk, C.GRIP_RELEASE, "放料小开度")
+    grip(lk, close=False)
     arm(lk, "升回观察位", C.OBSERVE)
-    grip_to(lk, C.GRIP_OPEN, "回复位开度")
 
 
 def pick_from_carrier(lk, slot):
-    """盘上取料: 悬停 → 下探 → 夹1400 → 抬悬停 → 开1225 → 回复位。"""
+    """盘上取料: 悬停 → 下探 → 夹1400 → 抬悬停 → 回复位。"""
     arm(lk, "到盘槽位上方", carrier_pose(slot, work=False))
     arm(lk, "下探取料", carrier_pose(slot, work=True))
     grip(lk, close=True)
     arm(lk, "抬回盘上方", carrier_pose(slot, work=False))
-    grip_to(lk, C.GRIP_OPEN_WIDE, "抬悬停松一档")
     arm(lk, "回复位", C.RESET)
 
 _STEP = [0]
