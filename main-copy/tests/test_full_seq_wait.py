@@ -144,16 +144,18 @@ def _send_move_v(lk, dy_right, dx_fwd):
     return False
 
 
-def _align(lk, cam, find_fn, matrix, label, timeout):
-    """整车纠偏: 回车触发, s=跳过; 死区3mm ≤5轮, 超时带误差继续(保完赛)。"""
-    try:
-        ans = input(f"\n<- 回车={label}(看-动-再看) / s=跳过: ").strip().lower()
-    except EOFError:
-        print("  (无输入) 跳过纠偏")
-        return
-    if ans == "s":
-        print("  !! 跳过纠偏(人工兜底)")
-        return
+def _align(lk, cam, find_fn, matrix, label, timeout, auto=False):
+    """整车纠偏: 看-动-再看, 死区3mm ≤5轮, 超时带误差继续(保完赛)。
+    auto=True 不弹门控直接跑(定一用); 默认回车触发, s=跳过(人工兜底)。"""
+    if not auto:
+        try:
+            ans = input(f"\n<- 回车={label}(看-动-再看) / s=跳过: ").strip().lower()
+        except EOFError:
+            print("  (无输入) 跳过纠偏")
+            return
+        if ans == "s":
+            print("  !! 跳过纠偏(人工兜底)")
+            return
     deadline = time.time() + C.ALIGN_TIMEOUT
     for i in range(1, C.ALIGN_MAX_ITER + 1):
         obj, _fr = finder.find_stable(find_fn, cam,
@@ -256,28 +258,38 @@ def pick_from_carrier(lk, slot):
 # ---- 动作组①: 抓料(转盘→盘, 守株待兔: 定一后车不动, 原地等色) ----
 
 def wait_and_grab(lk, cam, backend, color, timeout):
-    """原地等目标色: 进抓取窗(GRAB_WINDOW)+连帧稳定(转盘停歇)→下探抓;
-    超时/跳过返回 False(槽位不推进, 保完赛)。"""
+    """原地等目标色: 进抓取窗(GRAB_WINDOW)+连帧稳定→报告看到的色→你确认对才抓;
+    答"不对"回到等待(用剩余时间); 超时/跳过返回 False(槽位不推进, 保完赛)。"""
     try:
-        ans = input(f"\n<- 回车=开始等 {color}(≤{timeout:.0f}s, 转进窗+停歇即抓) "
+        ans = input(f"\n<- 回车=开始等 {color}(≤{timeout:.0f}s, 转进窗+停歇即报) "
                     f"/ s=跳过该色: ").strip().lower()
     except EOFError:
         ans = ""
     if ans == "s":
         print(f"  !! 跳过 {color}(人工兜底)")
         return False
-    mat, _fr = finder.wait_for_color(backend, cam, color,
-                                     px_per_mm=C.PX_PER_MM, timeout=timeout)
-    if mat is None:
-        print(f"  !! {timeout:.0f}s 未等到 {color}, 跳过该色(保完赛)")
-        return False
-    a, b, c, d = C.IMG2BODY
-    print(f"  ✓ {color} 到位且停歇 (偏差 右{a*mat.dx+b*mat.dy:+.1f} "
-          f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 抓")
-    arm(lk, "下探抓取(离地150)", C.GRAB_NEAR)
-    grip(lk, close=True)
-    arm(lk, "升回复位", C.RESET)
-    return True
+    deadline = time.time() + timeout
+    while True:
+        mat, _fr = finder.wait_for_color(backend, cam, color,
+                                         px_per_mm=C.PX_PER_MM,
+                                         timeout=max(0.5, deadline - time.time()))
+        if mat is None:
+            print(f"  !! {timeout:.0f}s 未等到 {color}, 跳过该色(保完赛)")
+            return False
+        a, b, c, d = C.IMG2BODY
+        print(f"  ✓ 看到: {mat.color} (偏差 右{a*mat.dx+b*mat.dy:+.1f} "
+              f"前{c*mat.dx+d*mat.dy:+.1f}mm)")
+        try:
+            ok = input("  <- 看到得对吗? 回车=对, 抓 / n=不对, 继续等: ").strip().lower()
+        except EOFError:
+            ok = ""
+        if ok == "n":
+            print("  · 继续等…")
+            continue
+        arm(lk, "下探抓取(离地150)", C.GRAB_NEAR)
+        grip(lk, close=True)
+        arm(lk, "升回复位", C.RESET)
+        return True
 
 
 def action_grab_materials(lk, cam, backend, task, wait):
@@ -285,7 +297,7 @@ def action_grab_materials(lk, cam, backend, task, wait):
     print("\n===== 动作组①: 抓料 (守株待兔: 定一后原地等色, 车全程不动) =====")
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
     _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
-           "定一纠偏(建锚)", wait)
+           "定一纠偏(建锚)", wait, auto=True)   # 定一免确认, 直接跑
     _LEDGER.zero()
     slot = 0   # 槽位轮转: 第 i 颗抓到的放 P_{i+1}, 只在实际抓到时推进
     for color in task["batch1_colors"]:
