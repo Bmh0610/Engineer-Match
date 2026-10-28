@@ -71,9 +71,13 @@ def confirm(msg):
         pass
 
 
-def run_step(lk, label, tx, ack):
+def run_step(lk, label, tx, ack, auto=False):
+    """发帧等回执; auto=True 跳过回车确认直接执行(连续段), 默认人工门控。"""
     _STEP[0] += 1
-    confirm(f"{label}\n  hex={tx.hex(' ').upper()}")
+    if not auto:
+        confirm(f"{label}\n  hex={tx.hex(' ').upper()}")
+    else:
+        print(f"[{_STEP[0]}] {label}")
     lk.flush()
     lk.ser.write(tx)
     t0 = time.time()
@@ -93,21 +97,22 @@ def run_step(lk, label, tx, ack):
     time.sleep(2)
 
 
-def arm(lk, label, pose):
-    run_step(lk, f"{label} {tuple(pose)}", frame(Mode.MOVE_A, *pose), Mode.ACK_ARM)
+def arm(lk, label, pose, auto=False):
+    run_step(lk, f"{label} {tuple(pose)}", frame(Mode.MOVE_A, *pose),
+             Mode.ACK_ARM, auto=auto)
 
 
-def chassis(lk, label, dx, dy):
+def chassis(lk, label, dx, dy, auto=False):
     """底盘送位(入账): 右 dx, 前 dy mm——只用于工作区内微调。"""
     _LEDGER.add(dx, dy)
     run_step(lk, f"{label} (右{dx:+.0f},前{dy:+.0f})mm",
-             frame(Mode.MOVE_V, dx, dy, 0), Mode.ACK_CHASSIS)
+             frame(Mode.MOVE_V, dx, dy, 0), Mode.ACK_CHASSIS, auto=auto)
 
 
 def leg_move(lk, dx, dy, dz, label):
-    """行程腿 move_v(不入账——腿间移动, 非工作区微调)。"""
+    """行程腿 move_v(不入账——腿间移动, 非工作区微调); 连续跑不回车。"""
     run_step(lk, f"[腿] {label} (右{dx:+.0f} 前{dy:+.0f} 转{dz:+.0f})",
-             frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS)
+             frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS, auto=True)
 
 
 def return_to_anchor(lk, tag):
@@ -122,10 +127,10 @@ def return_to_anchor(lk, tag):
     _LEDGER.zero()
 
 
-def grip(lk, close):
+def grip(lk, close, auto=False):
     ang, t = C.GRIP_CLOSE if close else C.GRIP_OPEN
     run_step(lk, f"夹爪{'闭合' if close else '张开'}({ang})",
-             frame(Mode.GRIPPER, ang, t), Mode.ACK_GRIPPER)
+             frame(Mode.GRIPPER, ang, t), Mode.ACK_GRIPPER, auto=auto)
 
 
 # ---- 纠偏(看-动-再看): 纠偏 move_v 直发并入账 ----
@@ -238,12 +243,12 @@ def carrier_pose(slot, work=True):
     return (p[0], p[1] if work else float(C.H_LIFT), p[2])
 
 
-def place_to_carrier(lk, slot):
+def place_to_carrier(lk, slot, auto=False):
     """盘上放置: 悬停 → 下探 → 张800 → 升回观察位。"""
-    arm(lk, "到盘槽位上方", carrier_pose(slot, work=False))
-    arm(lk, "下探放料", carrier_pose(slot, work=True))
-    grip(lk, close=False)
-    arm(lk, "升回观察位", C.OBSERVE)
+    arm(lk, "到盘槽位上方", carrier_pose(slot, work=False), auto=auto)
+    arm(lk, "下探放料", carrier_pose(slot, work=True), auto=auto)
+    grip(lk, close=False, auto=auto)
+    arm(lk, "升回观察位", C.OBSERVE, auto=auto)
 
 
 def pick_from_carrier(lk, slot):
@@ -258,16 +263,10 @@ def pick_from_carrier(lk, slot):
 # ---- 动作组①: 抓料(转盘→盘, 守株待兔: 定一后车不动, 原地等色) ----
 
 def wait_and_grab(lk, cam, backend, color, timeout):
-    """原地等目标色: 进抓取窗(GRAB_WINDOW)+连帧稳定→报告看到的色→你确认对才抓;
-    答"不对"回到等待(用剩余时间); 超时/跳过返回 False(槽位不推进, 保完赛)。"""
-    try:
-        ans = input(f"\n<- 回车=开始等 {color}(≤{timeout:.0f}s, 转进窗+停歇即报) "
-                    f"/ s=跳过该色: ").strip().lower()
-    except EOFError:
-        ans = ""
-    if ans == "s":
-        print(f"  !! 跳过 {color}(人工兜底)")
-        return False
+    """原地等目标色: 进抓取窗+连帧稳定→报告看到的色→你确认对才抓;
+    答"不对"回到等待(用剩余时间); 超时返回 False(槽位不推进, 保完赛)。
+    抓取段连贯无回车; 下探带相机-夹爪补偿(GRIP_REACH_COMP)。"""
+    print(f"\n<等 {color}: 转进窗+停歇即报, ≤{timeout:.0f}s>")
     deadline = time.time() + timeout
     while True:
         mat, _fr = finder.wait_for_color(backend, cam, color,
@@ -286,9 +285,11 @@ def wait_and_grab(lk, cam, backend, color, timeout):
         if ok == "n":
             print("  · 继续等…")
             continue
-        arm(lk, "下探抓取(离地150)", C.GRAB_NEAR)
-        grip(lk, close=True)
-        arm(lk, "升回复位", C.RESET)
+        reach = C.GRAB_NEAR[0] + C.GRIP_REACH_COMP   # 相机比夹爪靠外15mm→多伸补偿
+        arm(lk, "下探抓取(离地150,含补偿)", (reach, C.GRAB_NEAR[1], C.GRAB_NEAR[2]),
+            auto=True)
+        grip(lk, close=True, auto=True)
+        arm(lk, "升回复位", C.RESET, auto=True)
         return True
 
 
@@ -303,9 +304,9 @@ def action_grab_materials(lk, cam, backend, task, wait):
     for color in task["batch1_colors"]:
         if wait_and_grab(lk, cam, backend, color, wait):
             return_to_anchor(lk, color)   # 车不动, 恒跳过(统一口径)
-            place_to_carrier(lk, slot)
+            place_to_carrier(lk, slot, auto=True)   # 抓取动作连贯, 无逐步回车
             slot += 1
-            arm(lk, "回复位(继续等下一色)", C.RESET)
+            arm(lk, "回复位(继续等下一色)", C.RESET, auto=True)
         else:
             print(f"  ({color} 未抓, 槽位不推进)")
     print("\n== 抓料完成 (车全程在锚点位, 账本为零) ==")
@@ -379,19 +380,13 @@ def action_grab_rings(lk, task, ring_map):
 # ---- 扫码 ----
 
 def scan_step(cam):
-    """扫码: 末端相机尝试 SCAN_TIMEOUT(扫码相机未接), 超时用兜底码。"""
-    try:
-        ans = input(f"\n<- 回车=扫码({C.SCAN_TIMEOUT:.0f}s, 超时用兜底码) "
-                    f"/ s=直接用兜底码: ").strip().lower()
-    except EOFError:
-        ans = ""
-    task = None
-    if ans != "s":
-        from vision.qr import QrScanner
-        task = QrScanner().scan_from_camera(cam, C.SCAN_TIMEOUT)
+    """扫码: 末端相机尝试 SCAN_TIMEOUT(扫码相机未接), 超时自动用兜底码; 无回车门控。"""
+    from vision.qr import QrScanner
+    print(f"<扫码: ≤{C.SCAN_TIMEOUT:.0f}s, 超时自动用兜底码>")
+    task = QrScanner().scan_from_camera(cam, C.SCAN_TIMEOUT)
     if task is None:
         task = parse_task(C.DEFAULT_TASK_CODE)
-        print(f"  !! 用兜底码 {C.DEFAULT_TASK_CODE}")
+        print(f"  !! 未扫到, 用兜底码 {C.DEFAULT_TASK_CODE}")
     print(f"  任务码: {task['raw']} | 色序 {task['batch1_colors']} "
           f"环号 {task['batch1_rings']}")
     return task
