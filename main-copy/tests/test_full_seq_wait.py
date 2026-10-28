@@ -7,7 +7,7 @@
 比赛值按实车转盘一圈周期调 config WAIT_COLOR_TIMEOUT, 建议≥1.5圈), 超时跳过
 该色槽位不推进(保完赛)。
 
-其余(腿/扫码/放环数字驱动右1中2左3兜底/抓环纯记忆±150/每轮回中/锚点接力)
+其余(腿/扫码/放环臂回转查表 左1中2右3/抓环纯臂回转无底盘/纠偏前延时3s)
 与 test_full_seq.py 完全同款, 全文见那份。
 
 流程: 前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90→【守株抓料】→逆转90→前进920
@@ -36,7 +36,6 @@ from task.ring import find_rings  # noqa: E402
 ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
             Mode.ACK_GRIPPER: "0x0013夹爪"}
 
-_DIGIT_POS_DEFAULT = {1: "right", 2: "mid", 3: "left"}
 
 _STEP = [0]
 
@@ -115,7 +114,7 @@ def leg_move(lk, dx, dy, dz, label):
              frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS, auto=True)
 
 
-def return_to_anchor(lk, tag):
+def return_to_anchor(lk, tag, auto=False):
     """回中: 发记账反向和并清零。账零自动跳过; 不依赖视觉(死账)。"""
     if _LEDGER.at_anchor:
         print(f"  · [{tag}]已在中位(记账为零), 跳过回中")
@@ -123,7 +122,8 @@ def return_to_anchor(lk, tag):
     dy, dx = -_LEDGER.dx, -_LEDGER.dy
     run_step(lk, f"回中[{tag}] (记账 右{_LEDGER.dx:+.0f} 前{_LEDGER.dy:+.0f}"
                  f" → 反向 右{dy:+.0f} 前{dx:+.0f})",
-             frame(Mode.MOVE_V, round(dy), round(dx), 0), Mode.ACK_CHASSIS)
+             frame(Mode.MOVE_V, round(dy), round(dx), 0), Mode.ACK_CHASSIS,
+             auto=auto)
     _LEDGER.zero()
 
 
@@ -161,6 +161,8 @@ def _align(lk, cam, find_fn, matrix, label, timeout, auto=False):
         if ans == "s":
             print("  !! 跳过纠偏(人工兜底)")
             return
+    print(f"  · 纠偏前延时 {C.ALIGN_PRE_DELAY:.0f}s…")
+    time.sleep(C.ALIGN_PRE_DELAY)
     deadline = time.time() + C.ALIGN_TIMEOUT
     for i in range(1, C.ALIGN_MAX_ITER + 1):
         obj, _fr = finder.find_stable(find_fn, cam,
@@ -199,40 +201,13 @@ def find_ring_mid_fn(backend):
     return find
 
 
-def ring_position(ring):
-    """检出环的画面位置: 左/中/右(以画面中心为基准, 环距像素阈值为档)。"""
-    half = C.RING_PITCH_PX / 2
-    return ("left" if ring.dx < -half
-            else "right" if ring.dx > half else "mid")
-
-
-def prepare_ring_target(backend, cam, digit):
-    """先探一帧定找法: digit 检出→按数字对位(并记实际位置); 未检出→右1中2左3 兜底。
-    返回 (find_fn, position)。position 记入映射给抓环用(不开视觉也能知道去哪抓)。"""
-    f = cam.read_latest(timeout=1.0)
-    rings = find_rings(backend, f) if f is not None else []
-    hit = next((r for r in rings if r.digit == digit), None)
-    if hit is not None:
-        pos = ring_position(hit)
-        print(f"  · {digit} 号环已检出(在{pos}位), 按数字对位")
-
-        def find(f_, _d=digit):
-            rs = [r for r in find_rings(backend, f_) if r.digit == _d]
-            return rs[0] if rs else None
-        return find, pos
-    pos = _DIGIT_POS_DEFAULT.get(digit, "mid")
-    print(f"  !! 数字 {digit} 未检出, 按默认位置兜底: {pos} 位 (右=1/中=2/左=3)")
-
-    def find(f_, _p=pos):
-        rs = find_rings(backend, f_)
-        if not rs:
-            return None
-        if _p == "left":
-            return min(rs, key=lambda r: r.cx)
-        if _p == "right":
-            return max(rs, key=lambda r: r.cx)
-        return min(rs, key=lambda r: r.dx ** 2 + r.dy ** 2)
-    return find, pos
+def ring_slot_pose(ring_no):
+    """环号→(下探位姿, 是否侧环): 左1=示教点 / 中2=x=0直下(H_PLACE_RING) / 右3=示教点。
+    圆环从左到右=1,2,3(定死); 抓环同 reach/theta, 高度换 H_GRAB_RING。"""
+    if ring_no == 2:
+        return (C.RESET[0], C.H_PLACE_RING, C.RESET[2]), False
+    pose = C.RING_SLOT_L if ring_no == 1 else C.RING_SLOT_R
+    return pose, True
 
 
 # ---- 盘上槽位与取放 ----
@@ -251,13 +226,13 @@ def place_to_carrier(lk, slot, auto=False):
     arm(lk, "升回观察位", C.OBSERVE, auto=auto)
 
 
-def pick_from_carrier(lk, slot):
+def pick_from_carrier(lk, slot, auto=False):
     """盘上取料: 悬停 → 下探 → 夹1400 → 抬悬停 → 回复位。"""
-    arm(lk, "到盘槽位上方", carrier_pose(slot, work=False))
-    arm(lk, "下探取料", carrier_pose(slot, work=True))
-    grip(lk, close=True)
-    arm(lk, "抬回盘上方", carrier_pose(slot, work=False))
-    arm(lk, "回复位", C.RESET)
+    arm(lk, "到盘槽位上方", carrier_pose(slot, work=False), auto=auto)
+    arm(lk, "下探取料", carrier_pose(slot, work=True), auto=auto)
+    grip(lk, close=True, auto=auto)
+    arm(lk, "抬回盘上方", carrier_pose(slot, work=False), auto=auto)
+    arm(lk, "回复位", C.RESET, auto=auto)
 
 
 # ---- 动作组①: 抓料(转盘→盘, 守株待兔: 定一后车不动, 原地等色) ----
@@ -312,68 +287,66 @@ def action_grab_materials(lk, cam, backend, task, wait):
     print("\n== 抓料完成 (车全程在锚点位, 账本为零) ==")
 
 
-# ---- 动作组②: 放环(盘→环, 数字驱动) — 返回数字→位置映射给抓环 ----
+# ---- 动作组②: 放环(盘→环, 臂回转查表: 左1/中2/右3) ----
 
 def _recheck(lk, cam, backend, timeout):
-    """回中后视觉复核: 目标=画面中心最近的物料(=中环那颗), 消记账残差; 后账清零。"""
-    try:
-        ans = input("  <- 回车=回中复核(对中环物料再纠偏) / s=跳过: ").strip().lower()
-    except EOFError:
-        print("  (无输入) 跳过复核")
-    else:
-        if ans == "s":
-            print("  !! 跳过复核(人工兜底)")
-        else:
-            _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
-                   "回中复核", timeout)
+    """回中后视觉复核(自动直跑): 目标=画面中心最近的物料(=中环那颗),
+    消记账残差; 后账清零。"""
+    _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
+           "回中复核", timeout, auto=True)
     _LEDGER.zero()
 
 
 def action_place_rings(lk, cam, backend, task, timeout):
-    """放环×3轮: 对中环纠偏建锚 → 按任务码(色,环号)对数字环纠偏 → 盘→环 → 回中。"""
-    print("\n===== 动作组②: 放环 (数字驱动, 建锚后每轮回中) =====")
-    arm(lk, "回复位", C.RESET)
+    """放环×3轮: 对中环纠偏建锚(唯一底盘动作) → 环号定槽位(左1/中2/右3,
+    圆环从左到右=1,2,3) → 臂回转查表放置(全连续, 无底盘/无回中/无数字识别)。"""
+    print("\n===== 动作组②: 放环 (臂回转查表: 左1/中2/右3) =====")
+    arm(lk, "回复位", C.RESET, auto=True)
     _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
-           "对中环纠偏(建锚)", timeout)
+           "对中环纠偏(建锚)", timeout, auto=True)
     _LEDGER.zero()
-    ring_map = {}
     for i, (color, ring_no) in enumerate(
             zip(task["batch1_colors"], task["batch1_rings"])):
-        print(f"\n----- 放 {color} → {ring_no} 号环 (取盘P{i + 1}) -----")
-        find_fn, pos = prepare_ring_target(backend, cam, ring_no)
-        ring_map[ring_no] = pos
-        _align(lk, cam, find_fn, C.IMG2BODY_RING,
-               f"{ring_no}号环纠偏", timeout)
-        pick_from_carrier(lk, i)
-        arm(lk, "下探放环(离地65)", (C.RESET[0], C.H_PLACE_RING, C.RESET[2]))
-        grip(lk, close=False)
-        arm(lk, "升回复位", C.RESET)
-        return_to_anchor(lk, f"{ring_no}号环")
-        if pos != "mid":
-            _recheck(lk, cam, backend, timeout)
-    print(f"\n== 放环完成 (数字→位置映射: {ring_map}, 车在中环锚点位) ==")
-    return ring_map
+        pose, side = ring_slot_pose(ring_no)
+        pos_name = {1: "左", 2: "中", 3: "右"}[ring_no]
+        print(f"\n----- 放 {color} → {ring_no} 号环({pos_name}位, 取盘P{i + 1}) -----")
+        if side:
+            arm(lk, "回转到环位悬停", (pose[0], float(C.H_LIFT), pose[2]), auto=True)
+        pick_from_carrier(lk, i, auto=True)
+        if side:
+            arm(lk, "回环位悬停", (pose[0], float(C.H_LIFT), pose[2]), auto=True)
+        arm(lk, "下探放环", pose, auto=True)
+        grip(lk, close=False, auto=True)
+        if side:
+            arm(lk, "升回悬停", (pose[0], float(C.H_LIFT), pose[2]), auto=True)
+        else:
+            arm(lk, "升回复位", C.RESET, auto=True)
+    print("\n== 放环完成 (车在中环锚点位) ==")
 
 
 # ---- 动作组③: 抓环(环→盘, 纯记忆不开视觉) ----
 
-def action_grab_rings(lk, task, ring_map):
-    """抓环×3轮: 不开视觉——账本(锚点=中环位)+放环记下的数字→位置映射。
-    侧环=锚点±150 记账送位; 中环直接下探; 每轮抓完回中→放盘。"""
-    print("\n===== 动作组③: 抓环 (纯记忆: 账本+位置映射, 无视觉) =====")
+def action_grab_rings(lk, task):
+    """抓环×3轮: 纯记忆不开视觉——环号定槽位(左1/中2/右3), 臂回转查表下探抓→放盘。"""
+    print("\n===== 动作组③: 抓环 (臂回转查表, 无底盘无视觉) =====")
     for i, (color, ring_no) in enumerate(
             zip(task["batch1_colors"], task["batch1_rings"])):
-        pos = ring_map.get(ring_no) or _DIGIT_POS_DEFAULT.get(ring_no, "mid")
-        print(f"\n----- 抓 {ring_no} 号环({pos}位) → 盘P{i + 1} -----")
-        arm(lk, "回复位", C.RESET)
-        if pos != "mid":
-            dx = C.RING_PITCH_MM if pos == "right" else -C.RING_PITCH_MM
-            chassis(lk, f"底盘记账送位(右{dx:+.0f})", dx, 0)
-        arm(lk, "下探抓环(离地65)", (C.RESET[0], C.H_GRAB_RING, C.RESET[2]))
-        grip(lk, close=True)
-        arm(lk, "升回复位", C.RESET)
-        return_to_anchor(lk, f"{ring_no}号环")
-        place_to_carrier(lk, i)
+        pose, side = ring_slot_pose(ring_no)
+        pos_name = {1: "左", 2: "中", 3: "右"}[ring_no]
+        print(f"\n----- 抓 {ring_no} 号环({pos_name}位) → 盘P{i + 1} -----")
+        if side:
+            arm(lk, "回转到环位悬停", (pose[0], float(C.H_LIFT), pose[2]), auto=True)
+            arm(lk, "下探抓环(离地65)", (pose[0], C.H_GRAB_RING, pose[2]), auto=True)
+        else:
+            arm(lk, "下探抓环(离地65)", (C.RESET[0], C.H_GRAB_RING, C.RESET[2]),
+                auto=True)
+        grip(lk, close=True, auto=True)
+        if side:
+            arm(lk, "升回悬停", (pose[0], float(C.H_LIFT), pose[2]), auto=True)
+            arm(lk, "回复位", C.RESET, auto=True)
+        else:
+            arm(lk, "升回复位", C.RESET, auto=True)
+        place_to_carrier(lk, i, auto=True)
     print("\n== 抓环完成 (车在中环锚点位, 纯记忆) ==")
 
 
@@ -441,16 +414,16 @@ def main():
     if args.skip_to in ("start", "rough"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        ring_map = action_place_rings(lk, cam, backend, task, args.timeout)
-        action_grab_rings(lk, task, ring_map)
+        action_place_rings(lk, cam, backend, task, args.timeout)
+        action_grab_rings(lk, task)
         leg_move(lk, 0, 820, 0, "前进820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
         leg_move(lk, 0, 800, 0, "前进800(到暂存区)")
     if args.skip_to in ("start", "rough", "buffer"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        ring_map = action_place_rings(lk, cam, backend, task, args.timeout)
-        action_grab_rings(lk, task, ring_map)
+        action_place_rings(lk, cam, backend, task, args.timeout)
+        action_grab_rings(lk, task)
     if args.skip_to in ("start", "rough", "buffer", "home"):
         leg_move(lk, 0, 850, 0, "前进850")
         leg_move(lk, 0, 0, -90, "顺时针转90")
