@@ -210,28 +210,48 @@ def ring_slot_pose(ring_no):
     return pose, True
 
 
-# ---- 盘上槽位与取放 ----
+# ---- 载物舵盘(2026-10-27 改型: 舵机转盘选料, 固定取放点) ----
 
-def carrier_pose(slot, work=True):
-    """盘上槽位位姿: slot=0/1/2 → P1中间/P2车头/P3车尾; work=工作高, 否则悬停(H_LIFT)。"""
-    p = (C.CARRIER_P1, C.CARRIER_P2, C.CARRIER_P3)[slot]
-    return (p[0], p[1] if work else float(C.H_LIFT), p[2])
+_DIAL_AT = 0      # 舵盘当前对准固定点的料位号(代码顺序记忆: 第i颗料在第i格)
+_DIAL_HOMED = False
+
+
+def rotate_dial(lk, slot, auto=False):
+    """舵盘转位: 把 slot 号料位送到固定取放点。首次调用先回零找结束位标志。
+    协议未定(DIAL_CMD_HOME/MODE=None)时只打印占位记账, 不发送。"""
+    global _DIAL_AT, _DIAL_HOMED
+    if slot == _DIAL_AT:
+        return
+    if not _DIAL_HOMED:
+        print("  · [占位] 舵盘回零找结束位标志… (协议 MODE 待电控定)")
+        _DIAL_HOMED = True
+    ang = C.DIAL_SLOT_ANGLES[slot]
+    label = f"舵盘转位: 料位{_DIAL_AT}→料位{slot} (舵机{ang:.0f})"
+    if C.DIAL_CMD_MODE is None:
+        print(f"  · [占位] {label} —— 协议未定, 只记账不发送")
+    else:
+        run_step(lk, label, frame(C.DIAL_CMD_MODE, int(ang), 0, 0),
+                 Mode.ACK_CHASSIS, auto=auto)   # ⚠️回执常数待电控定, 暂按底盘
+    _DIAL_AT = slot
 
 
 def place_to_carrier(lk, slot, auto=False):
-    """盘上放置: 悬停 → 下探 → 张800 → 升回观察位。"""
-    arm(lk, "到盘槽位上方", carrier_pose(slot, work=False), auto=auto)
-    arm(lk, "下探放料", carrier_pose(slot, work=True), auto=auto)
+    """盘上放置(舵盘版): 转位到槽 → 固定点悬停 → 下探 → 张800 → 转下一格预备。"""
+    rotate_dial(lk, slot, auto=auto)
+    arm(lk, "到固定取放点悬停", C.DIAL_PICK_HOVER, auto=auto)
+    arm(lk, "下探放料", C.DIAL_PICK_WORK, auto=auto)
     grip(lk, close=False, auto=auto)
     arm(lk, "升回观察位", C.OBSERVE, auto=auto)
+    rotate_dial(lk, (slot + 1) % 3, auto=auto)   # 放完即转, 预备下一空槽
 
 
 def pick_from_carrier(lk, slot, auto=False):
-    """盘上取料: 悬停 → 下探 → 夹1400 → 抬悬停 → 回复位。"""
-    arm(lk, "到盘槽位上方", carrier_pose(slot, work=False), auto=auto)
-    arm(lk, "下探取料", carrier_pose(slot, work=True), auto=auto)
+    """盘上取料(舵盘版): 转位到槽 → 固定点悬停 → 下探 → 夹1400 → 抬悬停 → 回复位。"""
+    rotate_dial(lk, slot, auto=auto)
+    arm(lk, "到固定取放点悬停", C.DIAL_PICK_HOVER, auto=auto)
+    arm(lk, "下探取料", C.DIAL_PICK_WORK, auto=auto)
     grip(lk, close=True, auto=auto)
-    arm(lk, "抬回盘上方", carrier_pose(slot, work=False), auto=auto)
+    arm(lk, "抬回固定点悬停", C.DIAL_PICK_HOVER, auto=auto)
     arm(lk, "回复位", C.RESET, auto=auto)
 
 
@@ -411,6 +431,7 @@ def main():
         leg_move(lk, 0, 920, 0, "前进920")
         leg_move(lk, 0, 850, 0, "前进850")
         leg_move(lk, 0, 0, 90, "逆时针转90")
+        leg_move(lk, 0, 75, 0, "前进75(到守株抓取位)")
     if args.skip_to in ("start", "rough"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
