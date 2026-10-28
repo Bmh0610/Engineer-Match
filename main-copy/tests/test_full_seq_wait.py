@@ -10,10 +10,10 @@
 其余(腿/扫码/放环臂回转查表 左1中2右3/抓环纯臂回转无底盘/纠偏前延时3s)
 与 test_full_seq.py 完全同款, 全文见那份。
 
-流程: 前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90→【守株抓料】→逆转90→前进920
-→前进850→逆转90→【放环】【抓环】(粗加工区)→前进820→顺转90→前进800
-→【放环】【抓环】(暂存区)→前进850→顺转90→前进850→前进800→顺转90→右移50
-→后退50→完成(回启停区)。
+流程: 右移150→前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90→【守株抓料】
+→逆转90→前进920→前进850→逆转90→【放环】【抓环】(粗加工区)→后退820→顺转90
+→后退800(暂存区)→【放环】【抓环】→后退850→顺转90→后退850→后退800→逆转90
+→左移50→后退50→完成(回启停区)。
 
 用法: python3 tests/test_full_seq_wait.py [--skip-to start|rough|buffer|home]
       [--wait 60]
@@ -416,21 +416,21 @@ def main():
             task = parse_task(C.DEFAULT_TASK_CODE)
         action_place_rings(lk, cam, backend, task, args.timeout)
         action_grab_rings(lk, task)
-        leg_move(lk, 0, 820, 0, "前进820")
+        leg_move(lk, 0, -820, 0, "后退820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
-        leg_move(lk, 0, 800, 0, "前进800(到暂存区)")
+        leg_move(lk, 0, -800, 0, "后退800(到暂存区)")
     if args.skip_to in ("start", "rough", "buffer"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
         action_place_rings(lk, cam, backend, task, args.timeout)
         action_grab_rings(lk, task)
     if args.skip_to in ("start", "rough", "buffer", "home"):
-        leg_move(lk, 0, 850, 0, "前进850")
+        leg_move(lk, 0, -850, 0, "后退850")
         leg_move(lk, 0, 0, -90, "顺时针转90")
-        leg_move(lk, 0, 850, 0, "前进850")
-        leg_move(lk, 0, 800, 0, "前进800")
-        leg_move(lk, 0, 0, -90, "顺时针转90")
-        leg_move(lk, 50, 0, 0, "右移50")
+        leg_move(lk, 0, -850, 0, "后退850")
+        leg_move(lk, 0, -800, 0, "后退800")
+        leg_move(lk, 0, 0, 90, "逆时针转90")
+        leg_move(lk, -50, 0, 0, "左移50")
         leg_move(lk, 0, -50, 0, "后退50(回启停区)")
     print("\n== 全部完成 (账本为零=车在锚点位) ==")
 
