@@ -63,6 +63,10 @@ def main():
                     help="扫码总时长(秒, 默认30)")
     ap.add_argument("--no-gui", action="store_true", help="纯终端, 不开预览窗口")
     args = ap.parse_args()
+    import os
+    if not args.no_gui and not os.environ.get('DISPLAY'):
+        args.no_gui = True   # 无显示环境(纯SSH)自动转纯终端, 免imshow崩溃
+        print("(无DISPLAY, 自动纯终端模式)")
 
     from vision.camera import Camera
 
