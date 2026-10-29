@@ -199,6 +199,33 @@ def find_ring_mid_fn(backend):
     return find
 
 
+def _seek_mid_ring(lk, cam, backend, timeout):
+    """纠偏前判环找中环: 相机对着几号环, 1号(左)→y-80mm, 3号(右)→y+80mm,
+    直到对准2号环(中环)再纠偏; 未见环直接交给纠偏兜底。放环开场环空数字可见。
+    机械臂不在车中心, 到环区可能对着侧环——每次纠偏前判环纠正(用户 2026-10-27)。"""
+    deadline = time.time() + timeout
+    moved = 0
+    while time.time() < deadline and moved < 3:
+        f = cam.read_latest(timeout=0.2)
+        if f is None:
+            time.sleep(0.2)
+            continue
+        rings = find_rings(backend, f)
+        if not rings:
+            time.sleep(0.2)
+            continue
+        hit = min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2)
+        if hit.digit == 2:
+            print("  ✓ 已对准 2 号环(中环), 直接纠偏")
+            return
+        dy = -C.RING_SEEK_STEP if hit.digit == 1 else C.RING_SEEK_STEP
+        print(f"  · 当前对准 {hit.digit} 号环, 沿 y{dy:+.0f} 移动找 2 号环")
+        leg_move(lk, 0, dy, 0, f"判环送位(y{dy:+.0f}, 找中环)")
+        moved += 1
+        time.sleep(0.5)   # 挪后沉降再探
+    print("  !! 未见 2 号环(限次/限时), 直接纠偏(保完赛)")
+
+
 def ring_slot_pose(ring_no):
     """环号→(下探位姿, 是否侧环): 左1=示教点 / 中2=x=0直下(H_PLACE_RING) / 右3=示教点。
     圆环从左到右=1,2,3(定死); 抓环同 reach/theta, 高度换 H_GRAB_RING。"""
@@ -320,6 +347,7 @@ def action_place_rings(lk, cam, backend, task, timeout):
     圆环从左到右=1,2,3) → 臂回转查表放置(全连续, 无底盘/无回中/无数字识别)。"""
     print("\n===== 动作组②: 放环 (臂回转查表: 左1/中2/右3) =====")
     arm(lk, "回复位", C.RESET, auto=True)
+    _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
     _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout, auto=True)
     _LEDGER.zero()
