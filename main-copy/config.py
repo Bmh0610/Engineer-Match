@@ -14,7 +14,8 @@ MODEL_PATH = "/home/popcorn-car/main-copy/vision/best.engine"   # Nano 部署用
 
 # ---- 扫码(车左侧专用相机) ----
 CAMERA_ID_SCAN = 0            # 扫码相机设备号, 实测后只改这(扫码/末端可先用同一颗调试)
-SCAN_TIMEOUT = 5.0            # 扫码超时(秒), 超时用兜底码
+SCAN_TIMEOUT = 30.0           # 扫码超时(秒)——2026-10-27 用户从5s加到30s(联调期;
+                              # 比赛前若嫌兜底等待久再调回小值)
 DEFAULT_TASK_CODE = "123+123+123+123"   # 扫码失败兜底码(保完赛)
 
 # ---- 标定 ----
