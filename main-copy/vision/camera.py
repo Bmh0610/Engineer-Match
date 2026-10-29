@@ -1,6 +1,8 @@
 """末端相机: 采集线程常开, 后台维护"最新帧"(移植自 main_match/vision/cameras.py)。
 
 纠偏是"看-动-再看": 车动后的旧帧没有价值, 消费方一律 read_latest() 拿最新一帧。
+摄像头编号持久化: dev 可传 udev 别名("/dev/cam_scan"), open 时解析成
+当前实际编号再打开(V4L2 后端只认数字)——重插后 udev 更新指向, 解析自动跟随。
 曝光锁定: 自动曝光/白平衡是色漂主因(亮蓝→浅蓝, 亮绿→黄), 联调时按
 "最亮物料直方图不贴 255"标定曝光值, 填 EXPOSURE 并把 LOCK_EXPOSURE
 改 True —— 两件事一起做, 只锁不调值会更糟。
@@ -24,7 +26,17 @@ class Camera:
         self._thread = None
 
     def open(self):
-        self.cap = cv2.VideoCapture(self.dev)
+        dev = self.dev
+        if isinstance(dev, str) and not dev.isdigit():
+            # udev 别名(/dev/cam_*) → 解析当前实际节点号(V4L2 后端只认数字)
+            import os
+            import re
+            real = os.path.realpath(dev)
+            m = re.search(r"video(\d+)$", real)
+            if not m:
+                raise RuntimeError(f"相机 {dev} 解析不到 video 节点: {real}")
+            dev = int(m.group(1))
+        self.cap = cv2.VideoCapture(dev)
         if not self.cap.isOpened():   # 不存在/被占用/权限不足时显式报错, 别静默黑屏
             raise RuntimeError(
                 f"相机 {self.dev} 打不开: 设备不存在/被占用/权限不足"
