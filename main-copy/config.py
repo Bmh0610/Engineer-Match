@@ -8,12 +8,14 @@ SERIAL_PORT = "/dev/ttyUSB0"   # USB 直连; 排针备用=/dev/ttyTHS1
 CMD_TIMEOUT = 35.0             # 单命令单窗口(秒): 静默不重发(防双走)
 
 # ---- 相机 / 模型 ----
-CAMERA_ID_END = 0             # 末端相机(眼在手, 垂直向下); 编号随 USB 口变, 实测后只改这
+CAMERA_ID_END = "/dev/cam_end"      # 末端相机=udev 固定别名(按序列号绑定 Realtek
+                                    #  SYD_USB_Camera; 插上后自动生效, 规则同文件)
                               # 新 Nano 实测(2026-10-25): 当前接的相机=/dev/video0
 MODEL_PATH = "/home/popcorn-car/main-copy/vision/best.engine"   # Nano 部署用 .engine(TensorRT, 在 vision/ 下); 笔记本调试改 best.pt(需 ultralytics)
 
 # ---- 扫码(车左侧专用相机) ----
-CAMERA_ID_SCAN = 0            # 扫码相机设备号, 实测后只改这(扫码/末端可先用同一颗调试)
+CAMERA_ID_SCAN = "/dev/cam_scan"   # 扫码相机=udev 固定别名(按序列号绑定 HJ SN0001,
+                                   #  规则 /etc/udev/rules.d/99-camera-alias.rules)
 SCAN_TIMEOUT = 30.0           # 扫码超时(秒)——2026-10-27 用户从5s加到30s(联调期;
                               # 比赛前若嫌兜底等待久再调回小值)
 DEFAULT_TASK_CODE = "123+123+123+123"   # 扫码失败兜底码(保完赛)

@@ -27,7 +27,7 @@ class Camera:
         self.cap = cv2.VideoCapture(self.dev)
         if not self.cap.isOpened():   # 不存在/被占用/权限不足时显式报错, 别静默黑屏
             raise RuntimeError(
-                f"相机 /dev/video{self.dev} 打不开: 设备不存在/被占用/权限不足"
+                f"相机 {self.dev} 打不开: 设备不存在/被占用/权限不足"
                 f" (ls /dev/video* 核对编号; 被占用时关掉别的程序; 刚插 USB 等几秒)")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)

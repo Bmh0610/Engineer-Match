@@ -57,8 +57,8 @@ def draw(frame, dets, ok_data):
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="扫码专项测试(实时框+完整结果回显)")
-    ap.add_argument("--cam", type=int, default=C.CAMERA_ID_SCAN,
-                    help="扫码相机设备号(默认跟 config; 新插相机 ls /dev/video* 后 --cam N)")
+    ap.add_argument("--cam", default=str(C.CAMERA_ID_SCAN),
+                    help="扫码相机: udev 别名(/dev/cam_scan)或编号 N——默认跟 config")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="扫码总时长(秒, 默认30)")
     ap.add_argument("--no-gui", action="store_true", help="纯终端, 不开预览窗口")
@@ -66,7 +66,8 @@ def main():
 
     from vision.camera import Camera
 
-    cam = Camera(args.cam, "qr")
+    dev = int(args.cam) if str(args.cam).isdigit() else args.cam
+    cam = Camera(dev, "qr")
     cam.open()
     scanner = QrScanner()
     print(f"== 扫码测试: cam{args.cam} | 时长≤{args.timeout:.0f}s | {TASK_PATTERN_TIP}")
