@@ -158,8 +158,6 @@ def _align(lk, cam, find_fn, matrix, label, timeout, auto=False):
         if ans == "s":
             print("  !! 跳过纠偏(人工兜底)")
             return
-    print(f"  · 纠偏前延时 {C.ALIGN_PRE_DELAY:.0f}s…")
-    time.sleep(C.ALIGN_PRE_DELAY)
     deadline = time.time() + C.ALIGN_TIMEOUT
     for i in range(1, C.ALIGN_MAX_ITER + 1):
         obj, _fr = finder.find_stable(find_fn, cam,

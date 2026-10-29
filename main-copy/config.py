@@ -29,7 +29,6 @@ PX_PER_MM = 3.675              # 2026-10-24 标定(转180°重装后新高度): 
 #     PX_PER_MM_CENTER 两值, 并把 grab.py 里的引用按阶段分开即可。
 
 # ---- 阶段A 定位纠偏(移植 gcxl adjust_position_to_target 骨架) ----
-ALIGN_PRE_DELAY = 3.0    # 每次纠偏开始前的延时(秒, 用户 2026-10-27 定)——等车沉稳/视觉稳
 ALIGN_TOL_MM = 3.0       # 死区: 残差 ≤ 此值收工(gcxl 4px×0.72 同量级)
 ALIGN_MAX_ITER = 5       # 最多几轮 看-动-再看
 ALIGN_TIMEOUT = 30.0     # 总超时(秒), 超时告警继续(保完赛)
