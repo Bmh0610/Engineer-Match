@@ -38,22 +38,40 @@ def parse_task(raw):
 class QrScanner:
     """cv2 二维码检测(核心移植自 gcxl detect.py:692-800)。"""
 
+    # 小码救回: 1×检不出时逐级放大再检(640×480下6.5cm码~97px, 低于~100px检测极限)
+    SCALES = (1.0, 1.3, 2.0)
+
     def __init__(self):
         self.detector = cv2.QRCodeDetector()
 
-    def detect(self, frame):
-        """一帧 → [(data, box), ...]; 解码失败返回空表。box=(x,y,w,h) 像素。"""
-        ret_val, decoded_info, points, _ = self.detector.detectAndDecodeMulti(frame)
+    def _detect_scaled(self, img, scale):
+        """单尺度检测, 框坐标按 1/scale 映射回原帧。"""
+        ret_val, decoded_info, points, _ = self.detector.detectAndDecodeMulti(img)
         out = []
         if ret_val:
             for i, data in enumerate(decoded_info):
                 if data:
                     pts = points[i]
-                    x1, y1 = pts[:, 0].min(), pts[:, 1].min()
-                    x2, y2 = pts[:, 0].max(), pts[:, 1].max()
+                    x1, y1 = pts[:, 0].min() / scale, pts[:, 1].min() / scale
+                    x2, y2 = pts[:, 0].max() / scale, pts[:, 1].max() / scale
                     out.append((data, (int(x1), int(y1),
                                        int(x2 - x1), int(y2 - y1))))
         return out
+
+    def detect(self, frame):
+        """一帧 → [(data, box), ...]; 解码失败返回空表。box=(x,y,w,h) 像素。
+        逐级放大: 原帧1× → 1.3× → 2×, 小码(黑白格低于检测极限)靠放大救回。"""
+        for scale in self.SCALES:
+            if scale == 1.0:
+                dets = self._detect_scaled(frame, 1.0)
+            else:
+                h, w = frame.shape[:2]
+                big = cv2.resize(frame, (int(w * scale), int(h * scale)),
+                                 interpolation=cv2.INTER_CUBIC)
+                dets = self._detect_scaled(big, scale)
+            if dets:
+                return dets
+        return []
 
     def scan_from_camera(self, cam, timeout=5.0, poll=0.05):
         """循环取帧扫码, 首个合法任务码 → parse_task 结果; 超时返回 None。
