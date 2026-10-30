@@ -9,6 +9,7 @@
   0x0002 move_a 机械臂: X = 伸出距离 mm, Y = 离地高度 mm, Z = 回转角度°
       (顺时针/往车尾为负, 逆时针/往车头为正)
   0x0003 夹爪: X = 角度(分度 0.1°), Y = 执行时间 ms
+0x0004 舵盘: X = 目标角度(分度 1°, 逆时针+/顺时针-, 从结束位标志起算)
       闭合 (1400, 500), 张开 (800, 500) —— 数值在 config.GRIP_CLOSE/GRIP_OPEN
 上行: 0x0011 底盘完成 | 0x0012 机械臂完成 | 0x0013 夹爪完成 | 0x0014 舵盘完成
       | 0x2201 一键启动·短按(→启停区1) | 0x2202 一键启动·长按(→启停区2)
@@ -32,6 +33,8 @@ class Mode:
     MOVE_V = 0x0001        # 底盘: 车体系相对位移 (x 右, y 前, z 右转°)
     MOVE_A = 0x0002        # 机械臂: (伸出距离, 离地高度, 回转角°)
     GRIPPER = 0x0003       # 夹爪: (角度 0.1°, 执行时间 ms)
+    DIAL = 0x0004          # 舵盘转位: X=目标角度(分度1°, 逆时针+/顺时针-,
+                           #  从结束位标志起算; 2026-10-29 电控定)
     ACK_CHASSIS = 0x0011   # 底盘完成
     ACK_ARM = 0x0012       # 机械臂完成
     ACK_GRIPPER = 0x0013   # 夹爪完成
@@ -121,6 +124,11 @@ class Link:
     def gripper(self, angle_01deg: int, time_ms: int):
         """夹爪: 角度(0.1° 分度, 如 1300=130.0°), 执行时间 ms。"""
         self.ser.write(frame(Mode.GRIPPER, angle_01deg, time_ms))
+
+    def dial(self, angle_deg: int):
+        """舵盘(0x0004): 转盘转位, X=目标角度(分度 1°, 逆时针+/顺时针-, 从结束位起算)。
+        完成回执 ACK_DIAL(0x0014)。"""
+        self.ser.write(frame(Mode.DIAL, int(angle_deg), 0, 0))
 
     # ---- 上行 ----
 

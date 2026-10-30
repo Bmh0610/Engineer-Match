@@ -34,7 +34,7 @@ from vision.qr import parse_task  # noqa: E402
 from task.ring import find_rings  # noqa: E402
 
 ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
-            Mode.ACK_GRIPPER: "0x0013夹爪"}
+            Mode.ACK_GRIPPER: "0x0013夹爪", Mode.ACK_DIAL: "0x0014舵盘"}
 
 
 _STEP = [0]
@@ -242,21 +242,21 @@ _DIAL_HOMED = False
 
 
 def rotate_dial(lk, slot, auto=False):
-    """舵盘转位: 把 slot 号料位送到固定取放点。首次调用先回零找结束位标志。
-    协议未定(DIAL_CMD_HOME/MODE=None)时只打印占位记账, 不发送。"""
+    """舵盘转位: 发 0x0004(z=目标角度, 分度1°, 从结束位标志起算), 等 0x0014 完成。
+    首次调用若 DIAL_CMD_HOME 已定义则先回零; None=假设上电自动找标志(待电控确认)。"""
     global _DIAL_AT, _DIAL_HOMED
     if slot == _DIAL_AT:
         return
     if not _DIAL_HOMED:
-        print("  · [占位] 舵盘回零找结束位标志… (协议 MODE 待电控定)")
+        if C.DIAL_CMD_HOME is None:
+            print("  · [占位] 舵盘回零: 无独立命令, 假设上电自动找结束位标志")
+        else:
+            run_step(lk, "舵盘回零(找结束位标志)",
+                     frame(C.DIAL_CMD_HOME, 0, 0, 0), Mode.ACK_DIAL, auto=auto)
         _DIAL_HOMED = True
     ang = C.DIAL_SLOT_ANGLES[slot]
-    label = f"舵盘转位: 料位{_DIAL_AT}→料位{slot} (舵机{ang:.0f})"
-    if C.DIAL_CMD_MODE is None:
-        print(f"  · [占位] {label} —— 协议未定, 只记账不发送")
-    else:
-        run_step(lk, label, frame(C.DIAL_CMD_MODE, int(ang), 0, 0),
-                 Mode.ACK_CHASSIS, auto=auto)   # ⚠️回执常数待电控定, 暂按底盘
+    run_step(lk, f"舵盘转位: 料位{_DIAL_AT}→料位{slot} (舵机角度{ang:.0f}°)",
+             frame(C.DIAL_CMD_MODE, int(ang), 0, 0), Mode.ACK_DIAL, auto=auto)
     _DIAL_AT = slot
 
 
