@@ -5,13 +5,14 @@ State 模式(gcxl 同款): State.execute(ctx) 推进 ctx.current_state。
 避障后续挂 drive 层(封边重规划), 见记忆"行程打包避障"。
 
 用法:
-  实车:   python3 main.py --skip-start    # 电控 0x0020 未实现, 默认直跑
-  待回执: python3 main.py                 # 等一键启动回执
+  实车:   python3 main.py --skip-start    # 电控 0x2201/0x2202 未实现, 默认直跑
+  待回执: python3 main.py                 # 等一键启动: 短按(0x2201)=启1, 长按(0x2202)=启2
   环放置: python3 main.py --skip-start --place-ring
           # 抓3后接环放置(⚠️车须已在粗加工区; 运动段行程接入前的联调用;
           # 环面标定未填 config 时自动跳过, 料留盘上)
 """
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
@@ -20,6 +21,13 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 
 import config as C  # noqa: E402
+
+
+# ---- 出发点(一键启动长短按, 2026-10-29 电控口径: 短按<2s=0x2201→启1, 长按≥2s=0x2202→启2) ----
+# 摆车约定=车头朝二维码板: 启1 出发车头朝 +y(π/2), 启2 出发朝 -y(-π/2)。
+# start_node/start_heading 本步只记账+打印, 路线消费等导航层(nav_drive)落地后接。
+ZONE_NAME = {1: "启停区1", 3: "启停区2"}    # 节点号=map.yaml 编号(1~9: 启1=1, 启2=3)
+START_HEADING = {1: math.pi / 2, 3: -math.pi / 2}
 
 
 # ---- 行程函数(动作序列=默认参数; 避障后挂这层) ----
@@ -45,16 +53,27 @@ class State:
 class Step0_WaitStart(State):
     def execute(self, ctx):
         if ctx.skip_start:
-            print("Step0 跳过一键启动(--skip-start)")
+            if ctx.start_node is None:
+                ctx.start_node = 1
+            ctx.start_heading = START_HEADING[ctx.start_node]
+            print(f"Step0 跳过一键启动(--skip-start), 出发点={ZONE_NAME[ctx.start_node]}"
+                  f" (--start-node 可改)")
             ctx.current_state = Step1_ScanLeg()
             return
-        print("Step0 等待一键启动(0x0020)...")
+        print("Step0 等待一键启动: 短按(0x2201)=启停区1 / 长按(0x2202)=启停区2 ...")
         while True:
             for f in ctx.lk.poll():
                 if f.mode == Mode.BUTTON_START:
-                    print("  收到一键启动!")
-                    ctx.current_state = Step1_ScanLeg()
-                    return
+                    ctx.start_node = 1
+                    print("  收到一键启动: 短按 → 启停区1")
+                elif f.mode == Mode.BUTTON_START_2:
+                    ctx.start_node = 3
+                    print("  收到一键启动: 长按 → 启停区2")
+                else:
+                    continue
+                ctx.start_heading = START_HEADING[ctx.start_node]
+                ctx.current_state = Step1_ScanLeg()
+                return
             time.sleep(0.05)
 
 
@@ -127,10 +146,12 @@ class Step6_Done(State):
 
 class Context:
     def __init__(self, lk, grab, place, scanner, scan_cam,
-                 skip_start=False, place_ring=False):
+                 skip_start=False, place_ring=False, start_node=None):
         self.lk, self.grab, self.place = lk, grab, place
         self.scanner, self.scan_cam = scanner, scan_cam
         self.skip_start, self.place_ring = skip_start, place_ring
+        self.start_node = start_node   # None=未定(等按键); 1=启1, 3=启2 (map.yaml 节点号)
+        self.start_heading = None      # Step0 定出发点后按 START_HEADING 填
         self.task = None
         self.placed_colors = None
         self.current_state = Step0_WaitStart()
@@ -145,7 +166,10 @@ def main():
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
     ap.add_argument("--skip-start", action="store_true",
-                    help="跳过一键启动等待(电控 0x0020 未实现时用)")
+                    help="跳过一键启动等待(电控 0x2201/0x2202 未实现时用)")
+    ap.add_argument("--start-node", type=int, choices=(1, 3), default=None,
+                    help="出发点: 1=启停区1, 3=启停区2; --skip-start 时生效(默认1), "
+                         "否则以一键启动长短按为准")
     ap.add_argument("--place-ring", action="store_true",
                     help="抓3后接环放置(前提: 车已到粗加工区)")
     ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
@@ -171,7 +195,8 @@ def main():
     grab = StepGrab(lk, end_cam, backend)
     place = StepRing(lk, end_cam, backend_ring)
     ctx = Context(lk, grab, place, QrScanner(), scan_cam,
-                  skip_start=args.skip_start, place_ring=args.place_ring)
+                  skip_start=args.skip_start, place_ring=args.place_ring,
+                  start_node=args.start_node)
     try:
         ctx.run()
     except RuntimeError as e:   # 硬失败: 通信静默(不重发策略)
