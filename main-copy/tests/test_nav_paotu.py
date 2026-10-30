@@ -8,11 +8,19 @@
 节点检测(--check, 需前相机): 转向对准后 check_edge 扫下一条边, 命中=封边重规划
 (封边超 config.MAX_OBSTACLES 硬失败); 默认纯跑图不检测。
 
+手动障碍测避障(不用相机, 两种):
+  ① 预封边: --block 1,6 --block 2,5 (可多次)——发车前把边封死, 验证 A* 改道
+    (如 --block 1,6 时 启1→物料盘 改走 1→2→5→6);
+  ② 门控封边: 逐段回车处输入 'a,b' 回车=模拟"节点检测命中"先把边封掉再执行该段
+    (goto 自动绕行, 车不驶入封锁边); 直接回车=正常执行; q=退出。
+    连续封边超 config.MAX_OBSTACLES=2 会硬失败(看门狗)。
+
 路线(节点号=map.yaml): 1 → 2 → 6 → 4 → 8 → 6 → 4 → 8 → 1
   ⚠ 码(2)↔物料盘(6) 无直连边, 由 A* 自选 2→1→6(外圈) 或 2→5→6(内十字, 含窄道边费)。
 
 用法: python3 tests/test_nav_paotu.py [--port /dev/ttyUSB0] [--start 1|3]
                [--check --cam 2 --model best.engine] [--auto]
+               [--block 1,6 --block 2,5]
 前置: 整车上电 → 启停区摆车(车头朝码) → 回车发车对位 → 逐段回车执行。
 """
 import argparse
@@ -44,6 +52,8 @@ def main():
                     help="前部相机设备号(待实测; 仅 --check 时打开)")
     ap.add_argument("--model", default=C.MODEL_PATH)
     ap.add_argument("--auto", action="store_true", help="跳过逐段回车门控(联调后期用)")
+    ap.add_argument("--block", action="append", default=[],
+                    help="预封边(模拟障碍), 可多次: --block 1,6 --block 2,5")
     args = ap.parse_args()
 
     from communication.protocol import Link
@@ -64,9 +74,36 @@ def main():
     start_heading = math.pi / 2 if args.start == 1 else -math.pi / 2   # 摆车约定: 车头朝码
     driver = NavDriver(lk, watcher, "navigation/map.yaml", args.start, start_heading)
 
+    for spec in args.block:   # 预封边: 发车前模拟已知障碍, goto 的 A* 自动绕行
+        try:
+            a, b = (int(v) for v in spec.replace("，", ",").split(","))
+        except ValueError:
+            sys.exit(f"!! --block 格式: a,b (如 --block 1,6), 收到 {spec!r}")
+        if a not in ZONE or b not in ZONE:
+            sys.exit(f"!! --block {spec}: 节点号须在 1~9")
+        driver.nav.map.block_edge(a, b)
+        print(f"  ⚠ 预封边 {a}↔{b} (模拟障碍)")
+
     def gate(msg):
-        if not args.auto:
-            input(msg)
+        """回车门控; 输入 'a,b'=先封边(模拟节点检测命中)再继续, q=退出, 直接回车=执行。"""
+        if args.auto:
+            return
+        while True:
+            s = input(msg + " [回车=执行 | a,b=封边 | q=退出] ").strip().replace("，", ",")
+            if not s:
+                return
+            if s.lower() in ("q", "quit", "exit"):
+                raise KeyboardInterrupt
+            try:
+                a, b = (int(v) for v in s.split(","))
+            except ValueError:
+                print("  !! 格式 a,b (如 1,6); 直接回车=执行")
+                continue
+            if a not in ZONE or b not in ZONE:
+                print("  !! 节点号须在 1~9")
+                continue
+            driver.nav.map.block_edge(a, b)
+            print(f"  ⚠ 已封边 {a}↔{b} (模拟障碍), 该段将绕行")
 
     gate(f"确认: 已上电 + 节点{args.start}({ZONE[args.start]})摆车(车头朝码)。回车发车对位...")
     driver.launch()
