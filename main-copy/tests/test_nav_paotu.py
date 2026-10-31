@@ -57,7 +57,7 @@ def main():
     args = ap.parse_args()
 
     from communication.protocol import Link
-    from task.nav_drive import NavDriver
+    from task.nav_drive import WORK_APPROACH_MM, NavDriver
 
     watcher = None
     if args.check:
@@ -113,7 +113,14 @@ def main():
         driver.goto(target)
         print(f"  ✓ 到达 节点{target}({ZONE[target]}) [{time.time() - t0:.0f}s]")
         if target in WORK:
-            print("  · 此处应执行动作组(本测试只跑图不动作)")
+            mm = WORK_APPROACH_MM.get(target, 0)
+            if mm:
+                gate(f"    回车: 工作点进给{mm:.0f}mm(纠偏前)")
+                driver.approach(mm)
+            print("  · 此处应执行动作组(纠偏+抓放; 本测试只跑图不动作)")
+            if mm:
+                gate(f"    回车: 工作点退回{mm:.0f}mm(退回节点再转向)")
+                driver.retreat(mm)
     print(f"== 跑图完成, 总耗时 {time.time() - t0:.0f}s ==")
 
 

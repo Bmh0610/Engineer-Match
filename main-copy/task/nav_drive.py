@@ -49,6 +49,11 @@ START_JOG = {1: (170.0, 190.0), 3: (-170.0, 190.0)}
 # (前三者与 main 线 STATION_HEAD 物理口径交叉验证一致); goto 默认自动查表, 联调确认。
 WORK_HEADING = {6: 0.0, 4: math.pi, 8: math.pi / 2, 2: math.pi / 2}
 
+# 工作点进给(2026-10-31 用户定): 到达节点后、纠偏/动作组前, 车头方向再前进 mm(图外腿, 不入图);
+# 工作组完成后必须 retreat 等量退回节点位、之后才转向下一段(否则转向中心偏离车道节点)。
+# 物料盘(6)=转盘在节点再前 100mm; 其余工作点缺省不进给, 要加只填数。
+WORK_APPROACH_MM = {6: 100.0}
+
 
 def turn_z(target_h, heading, rotation_sign):
     """地图系目标朝向 → move_v 相对转角 z(度, 顺时针为负), 归一 ±π 永远转劣弧。
@@ -113,6 +118,18 @@ class NavDriver:
             total += turn
             print(f"    末对齐{round(math.degrees(stop_heading)):+d}°: 转向{turn:.2f}")
         print(f"    总代价 {total:.2f} (1.0≈4s)")
+
+    def approach(self, mm):
+        """图外进给腿(到达工作点后、纠偏/动作组前): 车头方向前进 mm。
+        不入图不动记账; 工作组完成后必须 retreat 等量退回, 否则下一段 goto
+        的转向中心偏离节点、整条边走歪。"""
+        if mm:
+            self._send_move(0, mm, 0, f"工作点进给{mm:.0f}mm(不入图)")
+
+    def retreat(self, mm):
+        """图外退回腿(工作组完成后、转向下一段前): 车头反方向后退 mm 回节点位。"""
+        if mm:
+            self._send_move(0, -mm, 0, f"工作点退回{mm:.0f}mm(不入图)")
 
     def goto(self, target, stop_heading=None, check=True):
         """导航到 target 节点(节点检测制逐边循环)。
