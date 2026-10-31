@@ -44,9 +44,10 @@ from navigation.navigator import COST, Map, Navigator  # noqa: E402
 START_JOG = {1: (170.0, 190.0), 3: (-170.0, 190.0)}
 
 # 工作点停车朝向(固定系 rad): 臂=车体右侧=朝向 h-π/2 ⟹ "臂朝区域" ⟹ h=区域方向+π/2。
-# 物料盘(6)车头朝西(+x)臂朝北; 粗加工(4)车头朝东(-x)臂朝南; 暂存(8)车头朝南(+y)臂朝西。
-# (与 main 线 STATION_HEAD 物理口径交叉验证一致); goto 默认自动查表, 联调确认。
-WORK_HEADING = {6: 0.0, 4: math.pi, 8: math.pi / 2}
+# 物料盘(6)车头朝西(+x)臂朝北; 粗加工(4)车头朝东(-x)臂朝南; 暂存(8)车头朝南(+y)臂朝西;
+# 码(2)车头朝启2(+y)臂朝暂存(+x, 2026-10-31 用户定)——1→2 直达到达朝向即 +y, 零补转身。
+# (前三者与 main 线 STATION_HEAD 物理口径交叉验证一致); goto 默认自动查表, 联调确认。
+WORK_HEADING = {6: 0.0, 4: math.pi, 8: math.pi / 2, 2: math.pi / 2}
 
 
 def turn_z(target_h, heading, rotation_sign):
