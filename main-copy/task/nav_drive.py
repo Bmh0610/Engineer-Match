@@ -39,7 +39,8 @@ from navigation.navigator import COST, Map, Navigator  # noqa: E402
 
 # 发车对位腿(车体系 右移,前进 mm, 2026-10-31 更正: 实际距离=170/190, 初记 17/19 系口径笔误;
 # move_v 分度=1mm——实车实测 move_v(100)走100mm/z=90转90° 佐证): 摆车位→车道中心节点,
-# 发车后先走、不入图。启1=右移170+前进190(实测); 启2=镜像预测左移170+前进190, 待实车卷尺复核。
+# 发车后先走、不入图; finish() 按其反向量退回摆车位(收车对位, 两区镜像自动)。
+# 启1=右移170+前进190(实测); 启2=镜像预测左移170+前进190, 待实车卷尺复核。
 # (与守株版老路线首腿"右移150(起步对位)"同量级, 旧 10 倍悬案随之闭合)
 START_JOG = {1: (170.0, 190.0), 3: (-170.0, 190.0)}
 
@@ -132,6 +133,19 @@ class NavDriver:
         if mm:
             self._send_move(-mm, 0, 0, f"工作点横移退回(x-){mm:.0f}mm(不入图)")
 
+    def finish(self):
+        """收车对位腿(goto 回出发节点后): 恢复发车朝向 → 按 START_JOG 反向量退回摆车位,
+        与 launch() 互逆。两区镜像自动: 启1=转回+y 后 左移170+后退190;
+        启2=转回-y 后 右移170+后退190(即 x+170,y-190)。调用前须已 goto(start_node)。"""
+        z = turn_z(self.start_heading, self.heading, self.rotation_sign)
+        if z:
+            self._send_move(0, 0, z, f"收车对位转向{z:+d}°(恢复发车朝向)")
+        self.heading = self.start_heading
+        jog = START_JOG.get(self.start_node)
+        if jog:
+            self._send_move(-jog[0], -jog[1], 0,
+                            f"退回摆车位(左{jog[0]:+.0f} 后{jog[1]:+.0f})")
+
     def goto(self, target, stop_heading=None, check=True):
         """导航到 target 节点(节点检测制逐边循环)。
 
@@ -142,6 +156,9 @@ class NavDriver:
         """
         if stop_heading is None:
             stop_heading = WORK_HEADING.get(target)
+            if stop_heading is None and target == self.start_node:
+                stop_heading = self.start_heading   # 回出发节点=恢复发车朝向
+                # (astar 借末转向代价偏好对齐来路, 避开 180° 掉头死区; finish 只补残差)
         self._blocks = 0
         while True:
             # plan() 会把 nav.heading 推进到路线末端, 每次重规划前先对齐记账真值

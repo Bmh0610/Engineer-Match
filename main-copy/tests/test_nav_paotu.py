@@ -121,6 +121,8 @@ def main():
             if mm:
                 gate(f"    回车: 工作点退回{mm:.0f}mm(退回节点再转向)")
                 driver.retreat(mm)
+    gate("回车: 收车对位(恢复发车朝向+退回摆车位)...")
+    driver.finish()
     print(f"== 跑图完成, 总耗时 {time.time() - t0:.0f}s ==")
 
 
