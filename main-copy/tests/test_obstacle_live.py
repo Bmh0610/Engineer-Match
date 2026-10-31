@@ -58,13 +58,28 @@ def main():
     watcher = ObstacleWatcher(backend, cam)
 
     def draw(frame, dets):
-        for d in dets:
+        h, w = frame.shape[:2]
+        if obs.LANE_BAND:   # 车道带(若开): 绿色半透明横带
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, int(obs.LANE_BAND[0] * h)),
+                          (w, int(obs.LANE_BAND[1] * h)), (0, 255, 0), -1)
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+        gate = obs._gate(dets, frame.shape)
+        for d in dets:      # 过门控=红粗框; 被滤=灰细框
+            on = d is gate
             x1, y1, x2, y2 = (int(v) for v in d.xyxy)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            cv2.putText(frame, f"{d.cls} {d.conf:.2f}", (x1, y1 - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        cv2.putText(frame, f"LANE_BAND={obs.LANE_BAND}", (8, 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2),
+                          (0, 0, 255) if on else (160, 160, 160), 3 if on else 1)
+            cv2.putText(frame, f"{d.cls} {d.conf:.2f} "
+                        f"~{est_dist(d.xyxy[3] - d.xyxy[1]):.0f}mm",
+                        (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55, (0, 0, 255) if on else (160, 160, 160), 2)
+        msg, color = (("OBSTACLE!", (0, 0, 255)) if gate else
+                      ("detected (gated out)", (0, 200, 255)) if dets else
+                      ("clear", (0, 255, 0)))
+        cv2.putText(frame, msg, (8, 32), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
+        cv2.putText(frame, f"conf>={args.conf}  LANE_BAND={obs.LANE_BAND}",
+                    (8, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.imshow("obstacle-test", frame)
 
     try:
