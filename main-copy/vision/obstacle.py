@@ -3,7 +3,8 @@
 黑对黑防线(数据集仅 17 张同框, 部署端必须兜):
   ① 阶段门控: 只开类 0, 物料 6 类不出结果(反之工作点亦然) —— 主力
   ② 车道带校验: 联调标定的"车道在画面里的可见带"(近低远高一条带),
-     判"挡没挡路"而非"像不像障碍" —— 最弱, 标不好可关(LANE_BAND=None)
+     判"挡没挡路"而非"像不像障碍" —— 最弱, 标不好可关(LANE_BAND=None);
+     避障相机有畸变时注入 calib: 底边中心点去畸变后再查带(YOLO 输入帧保持原图)
   ③ 时序确认: 连续 N 帧才认, 单帧看走眼不报警 —— 主力
 距离 = 像素高度→mm 标定表插值, 仅写日志(封边只需"有/无")。
 消费接口对齐 navigator.block_and_replan(由调度层接 on_obstacle 回调)。
@@ -18,8 +19,13 @@ CHECK_FRAMES = 5        # check_edge 取帧数
 CHECK_NEED = 3          # check_edge 达标帧数
 FRAME_GAP = 0.05
 
-# 车道带(归一化): 框底边 y2/H 须落在带内; 近处障碍→带底, 远处→带上。
-# 联调按前部相机倾角实测标定; 标不好置 None 关闭这道防线。
+# 车道ROI(归一化 x0,x1,y0,y1): 框底边中心点须落在 [x0,x1]×[y0,y1] 内才算挡本车道——
+# 广角画面会混入相邻边/前方交叉边的一角, ROI 把它们滤掉(2026-11-01 用户初定:
+# 水平中间2/3 × 垂直下面4/5 的交集), 联调按前部相机实际画面调; 置 None 关闭。
+# 设了 LANE_ROI 时下方 LANE_BAND 不再生效(ROI 是其二维精档, BAND 只管纵向)。
+LANE_ROI = (1 / 6, 5 / 6, 0.2, 1.0)
+
+# 车道带(归一化, 旧一维档, 被 LANE_ROI 取代保留兼容): 框底边 y2/H 须落在带内。
 LANE_BAND = (0.4, 1.0)
 
 # 距离标定表 [(框高px, 距离mm)]: 卷尺量几点填表, 线性插值。仅日志用。
@@ -38,23 +44,33 @@ def est_dist(h_px):
             return d1 + (d2 - d1) * (h_px - h1) / (h2 - h1)
 
 
-def _gate(dets, frame_shape):
-    """一帧的类 0 检出 → 通过帧内门限(conf + 车道带)的那条, 无则 None。"""
+def _gate(dets, frame_shape, calib=None):
+    """一帧的类 0 检出 → 通过帧内门限(conf + 车道ROI/带)的那条, 无则 None。
+
+    calib 注入时: 底边中心点先去畸变再查 ROI/带(YOLO 输入帧保持原图, 只修检测点)。"""
     h = frame_shape[0]
     for d in dets:
         if d.conf < WATCH_CONF:
             continue
-        if LANE_BAND:
-            y2 = d.xyxy[3] / h
-            if not LANE_BAND[0] <= y2 <= LANE_BAND[1]:
+        if LANE_ROI or LANE_BAND:
+            cx = (d.xyxy[0] + d.xyxy[2]) / 2
+            y2 = d.xyxy[3]
+            if calib is not None:
+                cx, y2 = calib.undistort_point(float(cx), float(y2))
+            if LANE_ROI is not None:
+                if not (LANE_ROI[0] <= cx / frame_shape[1] <= LANE_ROI[1]
+                        and LANE_ROI[2] <= y2 / h <= LANE_ROI[3]):
+                    continue
+            elif not LANE_BAND[0] <= y2 / h <= LANE_BAND[1]:
                 continue
         return d
     return None
 
 
 class ObstacleWatcher:
-    def __init__(self, backend, cam):
-        self.backend, self.cam = backend, cam
+    def __init__(self, backend, cam, calib=None):
+        self.backend, self.cam, self.calib = backend, cam, calib
+        # calib=避障相机内参(tools/calib_front.yaml, None=不去畸变回退)
         self._hit = 0
         self._alarm = False
         self._stop = threading.Event()
@@ -65,7 +81,7 @@ class ObstacleWatcher:
         f = self.cam.read_latest()
         if f is None:
             return None
-        return _gate(self.backend.infer(f, classes=OBSTACLE_CLS), f.shape)
+        return _gate(self.backend.infer(f, classes=OBSTACLE_CLS), f.shape, self.calib)
 
     def check_edge(self, n_frames=CHECK_FRAMES, need=CHECK_NEED):
         """节点转向对准下一条边后问一次: n 帧里 ≥need 帧疑似 → True(有障碍)。

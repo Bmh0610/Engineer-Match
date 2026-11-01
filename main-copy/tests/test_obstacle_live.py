@@ -2,8 +2,9 @@
 
 背景(2026-10-31): 前向避障相机未装, 先借扫码相机(/dev/cam_scan)验证
 "模型加载→推理→门控→check_edge"链路——把障碍物放进相机视野看检出。
-⚠️ 扫码相机不朝前: 只验"认得出", 不验"挡没挡路"; 车道带(LANE_BAND)默认关
-(按前相机标定, 扫码相机视野里框位置对不上会全滤), 装前相机后 --lane-band 开。
+⚠️ 车道过滤已升级为 LANE_ROI 矩形(2026-11-01 默认=水平中间2/3×垂直下面4/5, 滤掉
+广角画面里的相邻边/前方交叉边): 默认生效; --lane-roi 覆盖 / --no-lane 关闭。
+扫码相机借测时 ROI 按画面大致居中即可(验证"认得出"), 装前相机后按实视野调。
 
 模式:
   默认      实时打印: 每帧类0检出(置信度/框/估算距离)+门控结果, 0.5s 一条
@@ -34,8 +35,9 @@ def main():
                     help="check_edge 模式: 5帧≥3帧判定(其余时间待机)")
     ap.add_argument("--gui", action="store_true", help="开窗口画框(默认纯终端)")
     ap.add_argument("--conf", type=float, default=0.5, help="帧内门限(默认0.5)")
-    ap.add_argument("--lane-band", default=None,
-                    help="车道带 y2/H 范围如 0.4,1.0 (默认关——扫码相机未标定)")
+    ap.add_argument("--lane-roi", default=None,
+                    help="覆盖车道ROI x0,x1,y0,y1 (默认用 obstacle.LANE_ROI 模块值)")
+    ap.add_argument("--no-lane", action="store_true", help="关闭车道过滤(全画面)")
     args = ap.parse_args()
 
     import cv2
@@ -45,10 +47,12 @@ def main():
     from vision.detect import CLASSES, YOLOBackend
     from vision.obstacle import ObstacleWatcher, est_dist
 
-    obs.LANE_BAND = (tuple(float(v) for v in args.lane_band.split(","))
-                     if args.lane_band else None)   # 运行时覆盖, 不改 obstacle.py
+    if args.no_lane:
+        obs.LANE_ROI, obs.LANE_BAND = None, None
+    elif args.lane_roi:
+        obs.LANE_ROI = tuple(float(v) for v in args.lane_roi.split(","))
     obs.WATCH_CONF = args.conf
-    print(f"车道带: {obs.LANE_BAND} | 门限 conf≥{args.conf} | 模型 {args.model}")
+    print(f"车道ROI: {obs.LANE_ROI} | 门限 conf≥{args.conf} | 模型 {args.model}")
 
     print(f"打开相机 {args.cam} ...")
     cam = Camera(args.cam, "obstacle-test")
@@ -59,11 +63,14 @@ def main():
 
     def draw(frame, dets):
         h, w = frame.shape[:2]
-        if obs.LANE_BAND:   # 车道带(若开): 绿色半透明横带
+        if obs.LANE_ROI:    # 车道ROI(若开): 绿色半透明矩形
+            x0, x1, y0, y1 = obs.LANE_ROI
             overlay = frame.copy()
-            cv2.rectangle(overlay, (0, int(obs.LANE_BAND[0] * h)),
-                          (w, int(obs.LANE_BAND[1] * h)), (0, 255, 0), -1)
-            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+            cv2.rectangle(overlay, (int(x0 * w), int(y0 * h)),
+                          (int(x1 * w), int(y1 * h)), (0, 255, 0), -1)
+            cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
+            cv2.rectangle(frame, (int(x0 * w), int(y0 * h)),
+                          (int(x1 * w), int(y1 * h)), (0, 255, 0), 1)
         gate = obs._gate(dets, frame.shape)
         for d in dets:      # 过门控=红粗框; 被滤=灰细框
             on = d is gate
@@ -78,7 +85,7 @@ def main():
                       ("detected (gated out)", (0, 200, 255)) if dets else
                       ("clear", (0, 255, 0)))
         cv2.putText(frame, msg, (8, 32), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
-        cv2.putText(frame, f"conf>={args.conf}  LANE_BAND={obs.LANE_BAND}",
+        cv2.putText(frame, f"conf>={args.conf}  LANE_ROI={obs.LANE_ROI}",
                     (8, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.imshow("obstacle-test", frame)
 
