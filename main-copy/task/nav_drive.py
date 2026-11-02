@@ -17,7 +17,8 @@
     from vision.detect import YOLOBackend
     from vision.obstacle import ObstacleWatcher
     from task.nav_drive import NavDriver
-    backend = YOLOBackend(C.MODEL_PATH)          # 共用引擎, infer(classes=[0]) 阶段门控
+    obstacle_backend = YOLOBackend(C.MODEL_PATH_OBSTACLE, names={0: "obstacle"})
+                                                 # 避障专用单类引擎(物料/环走 MODEL_PATH 的 wuliao 引擎)
     front = Camera(<前相机设备号>, "front"); front.open()
     driver = NavDriver(lk, ObstacleWatcher(backend, front), "navigation/map.yaml",
                        start_node=1, start_heading=math.pi / 2)

@@ -15,7 +15,12 @@ MAX_OBSTACLES = 2            # 场上障碍上限(2026-10-29 用户定): goto �
 CAMERA_ID_END = "/dev/cam_end"      # 末端相机=udev 固定别名(按序列号绑定 Realtek
                                     #  SYD_USB_Camera; 插上后自动生效, 规则同文件)
                               # 新 Nano 实测(2026-10-25): 当前接的相机=/dev/video0
-MODEL_PATH = "/home/popcorn-car/main-copy/vision/best.engine"   # Nano 部署用 .engine(TensorRT, 在 vision/ 下); 笔记本调试改 best.pt(需 ultralytics)
+MODEL_PATH = "/home/popcorn-car/main-copy/vision/wuliao-best.engine"   # 物料+数字环引擎(yolo11s 10类:
+                                # obstacle_black+物料6色+circle1/2/3, 笔记本 wuliao-best.pt 转换);
+                                # 笔记本调试改 wuliao-best.pt(需 ultralytics); 旧 best.engine 留作回退
+MODEL_PATH_OBSTACLE = "/home/popcorn-car/main-copy/vision/obstacle-best.engine"   # 避障专用引擎
+                                # (单类{0:'obstacle'}, 笔记本 obstacle-best.pt 转换; 供 ObstacleWatcher/
+                                #  test_nav_paotu --check/test_obstacle_live; 笔记本调试改 obstacle-best.pt)
 
 # ---- 扫码(车左侧专用相机) ----
 CAMERA_ID_SCAN = "/dev/cam_scan"   # 扫码相机=udev 固定别名(按序列号绑定 HJ SN0001,
@@ -23,6 +28,12 @@ CAMERA_ID_SCAN = "/dev/cam_scan"   # 扫码相机=udev 固定别名(按序列号
 SCAN_TIMEOUT = 30.0           # 扫码超时(秒)——2026-10-27 用户从5s加到30s(联调期;
                               # 比赛前若嫌兜底等待久再调回小值)
 DEFAULT_TASK_CODE = "123+123+123+123"   # 扫码失败兜底码(保完赛)
+
+# ---- 前视避障相机(DECXIN DCX-250107-ZW, 2026-10-31 定) ----
+CAMERA_ID_FRONT = "/dev/cam_front"   # udev 别名待建(款式同 99-camera-alias.rules); 建前用编号传 --cam
+USE_INTRINSICS_FRONT = True          # 避障相机有畸变: 检出底边点去畸变后再过 LANE_BAND 门控;
+                                     # 内参=tools/calib_front.yaml(calib_intr.py --out calib_front.yaml
+                                     # 生成), 缺文件自动回退不去畸变(不挡跑图)
 
 # ---- 标定 ----
 USE_INTRINSICS = False      # 现用无畸变镜头相机: 不加载内参/不去畸变;
@@ -123,8 +134,8 @@ GRAB_ACK_TOTAL = 23   # 3颗总回执: 近端7 + 端位8×2 = 23(0x0012×17 + 0x
 # ---- 环放置(粗加工区, 定一式: 对画面中间的环整车纠偏一次, 颗间只动臂查表放) ----
 # 数字→位置映射: 检出=YOLO 数字类判定(不按位置猜); 未检出数字按默认次序(1,2,3)
 # 填空位+告警。环模型与物料模型分开部署/重训, 检测前端独立于 finder(防权重混淆)。
-MODEL_PATH_RING = "/home/popcorn-car/main-copy/vision/best.engine"   # 环检测模型, 占位=与
-                                # 物料共用; 分开重训后改这(类别号一并改 RING_CLS)
+MODEL_PATH_RING = "/home/popcorn-car/main-copy/vision/wuliao-best.engine"   # 环检测模型=与
+                                # 物料同一引擎(circle1/2/3 在 wuliao 10 类里); 分开重训后改这
 RING_CLS = {1: 7, 2: 8, 3: 9}   # 数字→模型类别号(共用现 10 类模型=circle1/2/3;
                                 # 拆分重训后按新模型类别 id 改, 如 {1:0, 2:1, 3:2})
 RING_CONF = 0.4                 # 数字环检出门槛(贴纸数字小, 比物料 0.5 放宽)

@@ -48,9 +48,10 @@ def main():
                     help="出发点节点: 1=启停区1(默认), 3=启停区2")
     ap.add_argument("--check", action="store_true",
                     help="启用节点检测(需前相机; 默认纯跑图)")
-    ap.add_argument("--cam", default=2,
-                    help="前部相机设备号(待实测; 仅 --check 时打开)")
-    ap.add_argument("--model", default=C.MODEL_PATH)
+    ap.add_argument("--cam", default=C.CAMERA_ID_FRONT,
+                    help="前视避障相机设备/别名(默认跟 config.CAMERA_ID_FRONT; 仅 --check 时打开)")
+    ap.add_argument("--model", default=C.MODEL_PATH_OBSTACLE,
+                    help="避障检测引擎(默认 obstacle-best.engine; 笔记本调试用 obstacle-best.pt)")
     ap.add_argument("--auto", action="store_true", help="跳过逐段回车门控(联调后期用)")
     ap.add_argument("--block", action="append", default=[],
                     help="预封边(模拟障碍), 可多次: --block 1,6 --block 2,5")
@@ -64,11 +65,18 @@ def main():
         from vision.camera import Camera
         from vision.detect import YOLOBackend
         from vision.obstacle import ObstacleWatcher
-        print(f"加载模型 {args.model} ...")
-        backend = YOLOBackend(args.model)
+        print(f"加载避障模型 {args.model} ...")
+        backend = YOLOBackend(args.model, names={0: "obstacle"})
         front = Camera(args.cam, "front")
         front.open()
-        watcher = ObstacleWatcher(backend, front)
+        calib = None
+        if C.USE_INTRINSICS_FRONT:
+            from tools.calib import load as calib_load
+            calib = calib_load(BASE / "tools/calib_front.yaml")
+            if calib is None:
+                print("  ⚠ 内参缺(tools/calib_front.yaml): 去畸变跳过, 先跑 "
+                      "tools/calib_intr.py --calibrate --out calib_front.yaml")
+        watcher = ObstacleWatcher(backend, front, calib)
 
     lk = Link(args.port)
     start_heading = math.pi / 2 if args.start == 1 else -math.pi / 2   # 摆车约定: 车头朝码

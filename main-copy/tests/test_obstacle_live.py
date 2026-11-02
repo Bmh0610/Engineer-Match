@@ -30,7 +30,7 @@ def main():
     ap = argparse.ArgumentParser(description="障碍物检测专项(任意相机)")
     ap.add_argument("--cam", default="/dev/cam_scan",
                     help="相机设备(默认扫码相机; 装前相机后换其别名)")
-    ap.add_argument("--model", default=C.MODEL_PATH)
+    ap.add_argument("--model", default=C.MODEL_PATH_OBSTACLE)
     ap.add_argument("--check", action="store_true",
                     help="check_edge 模式: 5帧≥3帧判定(其余时间待机)")
     ap.add_argument("--gui", action="store_true", help="开窗口画框(默认纯终端)")
@@ -58,7 +58,7 @@ def main():
     cam = Camera(args.cam, "obstacle-test")
     cam.open()
     print(f"加载模型(首帧推理含预热, 稍等)...")
-    backend = YOLOBackend(args.model)
+    backend = YOLOBackend(args.model, names={0: "obstacle"})
     watcher = ObstacleWatcher(backend, cam)
 
     def draw(frame, dets):

@@ -142,8 +142,9 @@ def _postprocess(pred, nc, imgsz, conf_thres, iou_thres):
 
 
 class YOLOBackend:
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, names=None):
         self.path = model_path
+        self.names = names or CLASSES   # id→类名表; 双引擎后按模型传(如障碍引擎 {0:'obstacle'})
         self.lock = Lock()   # 多消费方共用一个引擎时串行化
         self._warmup()
 
@@ -178,7 +179,7 @@ class YOLOBackend:
         out = []
         for box in results[0].boxes:
             cid = int(box.cls)
-            out.append(Detection(cid, CLASSES[cid], float(box.conf),
+            out.append(Detection(cid, self.names.get(cid, f"id{cid}"), float(box.conf),
                                  tuple(float(v) for v in box.xyxy[0])))
         return out
 
@@ -188,7 +189,7 @@ class YOLOBackend:
             self.trt = _TrtRunner(self.path, DEFAULTS["imgsz"])
         blob, r, pad_x, pad_y = self.trt.letterbox(frame)
         preds = self.trt.run(blob)
-        nc = len(CLASSES)
+        nc = preds[0].shape[1] - 4   # 按引擎输出维度推类别数(双引擎 nc=10/1, 不再依赖硬编码表)
         dets = _postprocess(preds[0], nc, DEFAULTS["imgsz"],
                             DEFAULTS["conf"], 0.45)
         out = []
@@ -198,6 +199,6 @@ class YOLOBackend:
             # 960 坐标 → 原图: 去灰边, 除缩放
             x1, x2 = (x1 - pad_x) / r, (x2 - pad_x) / r
             y1, y2 = (y1 - pad_y) / r, (y2 - pad_y) / r
-            out.append(Detection(cid, CLASSES.get(cid, f"id{cid}"), conf,
+            out.append(Detection(cid, self.names.get(cid, f"id{cid}"), conf,
                                  (x1, y1, x2, y2)))
         return out
