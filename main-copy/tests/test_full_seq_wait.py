@@ -1,10 +1,10 @@
 """整场流程联调·守株待兔抓取版(2026-10-27): 与 test_full_seq.py 唯一区别=抓料换笨办法。
 
-抓料(笨办法): 定一纠偏(复位位, 建锚)之后车一动不动(账本恒零, 无前伸/无±90送位/
-无逐色纠偏), 臂停复位位盯夹爪正下方——任务码第1组下一色进抓取窗(GRAB_WINDOW)
-且连帧稳定(转盘停歇, finder.wait_for_color) → 发 MODE5 组2(下位机抓原料区→放车上格)
-→ 等 0x0015(35s)。无人工确认(视觉判定+稳定即发); 单色等待超时默认 60s(--wait 可改;
-比赛值按实车转盘一圈周期调, 建议≥1.5圈), 超时跳过该色槽位不推进(保完赛)。
+抓料(笨办法): 定一纠偏(复位位, 建锚)之后车一动不动, 臂停复位位盯夹爪正下方——
+任务码第1组下一色进抓取窗(GRAB_WINDOW)且连帧稳定(转盘停歇, finder.wait_for_color)
+→ 发 MODE5 组2(下位机抓原料区→放车上格) → 等 0x0015(35s)。无人工确认(视觉判定+
+稳定即发); 单色等待超时默认 60s(--wait 可改; 比赛值按实车转盘一圈周期调,
+建议≥1.5圈), 超时跳过该色槽位不推进(保完赛)。
 
 其余(腿/扫码/放环 MODE5 组1 车→地面/抓环 MODE5 组3 地面→车/判环找中环/
 对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
@@ -36,29 +36,6 @@ ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
             Mode.ACK_GRIPPER: "0x0013夹爪", Mode.ACK_ACTION: "0x0015成套动作"}
 
 _STEP = [0]
-
-
-class ChassisLedger:
-    """底盘记账器: 工作区所有 move_v 入账, 回中=发反向和+清零。
-    不变量: 回中(含复核)后账本为零; 账本非零=不在锚点。"""
-
-    def __init__(self):
-        self.dx = 0.0   # 右向累计 mm
-        self.dy = 0.0   # 前向累计 mm
-
-    def add(self, dy_right, dx_fwd):
-        self.dx += dy_right
-        self.dy += dx_fwd
-
-    def zero(self):
-        self.dx = self.dy = 0.0
-
-    @property
-    def at_anchor(self):
-        return abs(self.dx) < 1e-6 and abs(self.dy) < 1e-6
-
-
-_LEDGER = ChassisLedger()
 
 
 def confirm(msg):
@@ -99,42 +76,15 @@ def arm(lk, label, pose, auto=False):
              Mode.ACK_ARM, auto=auto)
 
 
-def chassis(lk, label, dx, dy, auto=False):
-    """底盘送位(入账): 右 dx, 前 dy mm——只用于工作区内微调。"""
-    _LEDGER.add(dx, dy)
-    run_step(lk, f"{label} (右{dx:+.0f},前{dy:+.0f})mm",
-             frame(Mode.MOVE_V, dx, dy, 0), Mode.ACK_CHASSIS, auto=auto)
-
-
 def leg_move(lk, dx, dy, dz, label):
     """行程腿 move_v(不入账——腿间移动, 非工作区微调); 连续跑不回车。"""
     run_step(lk, f"[腿] {label} (右{dx:+.0f} 前{dy:+.0f} 转{dz:+.0f})",
              frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS, auto=True)
 
 
-def return_to_anchor(lk, tag, auto=False):
-    """回中: 发记账反向和并清零。账零自动跳过; 不依赖视觉(死账)。"""
-    if _LEDGER.at_anchor:
-        print(f"  · [{tag}]已在中位(记账为零), 跳过回中")
-        return
-    dy, dx = -_LEDGER.dx, -_LEDGER.dy
-    run_step(lk, f"回中[{tag}] (记账 右{_LEDGER.dx:+.0f} 前{_LEDGER.dy:+.0f}"
-                 f" → 反向 右{dy:+.0f} 前{dx:+.0f})",
-             frame(Mode.MOVE_V, round(dy), round(dx), 0), Mode.ACK_CHASSIS,
-             auto=auto)
-    _LEDGER.zero()
-
-
-def grip(lk, close, auto=False):
-    ang, t = C.GRIP_CLOSE if close else C.GRIP_OPEN
-    run_step(lk, f"夹爪{'闭合' if close else '张开'}({ang})",
-             frame(Mode.GRIPPER, ang, t), Mode.ACK_GRIPPER, auto=auto)
-
-
 # ---- 纠偏(看-动-再看) ----
 
 def _send_move_v(lk, dy_right, dx_fwd):
-    _LEDGER.add(dy_right, dx_fwd)
     lk.flush()
     lk.ser.write(frame(Mode.MOVE_V, round(dy_right), round(dx_fwd), 0))
     t0 = time.time()
@@ -224,15 +174,6 @@ def _seek_mid_ring(lk, cam, backend, timeout):
     print("  !! 未见 2 号环(限次/限时), 直接纠偏(保完赛)")
 
 
-def ring_slot_pose(ring_no):
-    """环号→(下探位姿, 是否侧环): 左1=示教点 / 中2=x=0直下(H_PLACE_RING) / 右3=示教点。
-    圆环从左到右=1,2,3(定死); 抓环同 reach/theta, 高度换 H_GRAB_RING。"""
-    if ring_no == 2:
-        return (C.RESET[0], C.H_PLACE_RING, C.RESET[2]), False
-    pose = C.RING_SLOT_L if ring_no == 1 else C.RING_SLOT_R
-    return pose, True
-
-
 # ---- MODE 5 成套动作(三段搬运由下位机执行, 上位机只调用+等 0x0015) ----
 
 def run_action(lk, group, outer, car, timeout):
@@ -259,7 +200,6 @@ def action_grab_materials(lk, cam, backend, task, wait):
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
     _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
            "定一纠偏(建锚)", wait, auto=True)   # 定一免确认, 直接跑
-    _LEDGER.zero()
     for i, color in enumerate(task["batch1_colors"]):
         print(f"\n<等 {color}: 转进窗+停歇即发 MODE5, ≤{wait:.0f}s>")
         mat, _fr = finder.wait_for_color(backend, cam, color,
@@ -277,14 +217,6 @@ def action_grab_materials(lk, cam, backend, task, wait):
 
 # ---- 动作组②: 放环(盘→环, MODE5 组1: 车→地面) ----
 
-def _recheck(lk, cam, backend, timeout):
-    """回中后视觉复核(自动直跑): 目标=画面中心最近的物料(=中环那颗),
-    消记账残差; 后账清零。"""
-    _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
-           "回中复核", timeout, auto=True)
-    _LEDGER.zero()
-
-
 def action_place_rings(lk, cam, backend, task, timeout):
     """放环×3轮: 判环找中环+对中环纠偏建锚(唯一底盘动作) → MODE5 组1(车→地面)。"""
     print("\n===== 动作组②: 放环 (MODE5 组1: 车→地面) =====")
@@ -292,7 +224,6 @@ def action_place_rings(lk, cam, backend, task, timeout):
     _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
     _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout, auto=True)
-    _LEDGER.zero()
     for i, (color, ring_no) in enumerate(
             zip(task["batch1_colors"], task["batch1_rings"])):
         pos_name = {1: "左", 2: "中", 3: "右"}[ring_no]
