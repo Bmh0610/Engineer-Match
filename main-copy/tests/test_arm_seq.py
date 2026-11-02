@@ -3,7 +3,8 @@
 任务码执行前交互输入一次(空回车=默认): 4 组完整码=两圈全跑, 2 组简写=只跑第一圈。
 
 序列(456+321 例, 全程零账本——环位是固定靶位, 放环后每环内容即任务码推演的确定结果):
-  ①抓料   组2 (2,i,i) i=1..3    视觉判序, 第 i 个抓到的上盘格 i
+  ①抓料   组2 (2,2,i) i=1..3    视觉判序, Y=2 恒定取料工位(转盘送料进夹爪
+                                正下方, 只此一个抓取点), Z=第 i 个抓的上盘格 i
   ②粗区放环 组1 (1,G2[i],i)     盘格i → 环G2[i]
   ③粗区抓环 组3 (3,r,r) r=3,2,1 倒序恒等: 环r→盘格r(纯记忆, 数字被物料挡)
   ④暂区放环 组1 (1,i,i) i=1..3  盘格i→暂存位i(恒等恰=G2 两区同位, 零账本)
@@ -47,10 +48,11 @@ def run(lk, group, outer, car, timeout):
 
 
 def grab_seg(lk, args, colors, batch="①"):
-    """抓料段: 组2 (2, i, i)。"""
+    """抓料段: 组2 (2, 2, i)——Y=2 恒定取料工位(守株只此一个抓取点),
+    Z=第 i 个抓的上盘格 i。"""
     seg(f"{batch} 抓料 色序={colors}")
     for i in range(1, len(colors) + 1):
-        run(lk, 2, i, i, args.timeout)
+        run(lk, 2, 2, i, args.timeout)
 
 
 def place_seg(lk, args, rings, batch="②"):
@@ -128,7 +130,7 @@ def main():
     two = bool(task["batch2_colors"])
     print(f"任务码 {task['raw']} | 批1 色{c1} 环{r1}"
           + (f" | 批2 色{task['batch2_colors']} 环{task['batch2_rings']}" if two else ""))
-    print("口径: 抓料按序上盘i / 放环(1,环号,盘格i) / 抓环倒序(3,r,r) / "
+    print("口径: 抓料(2,2,i)按序上盘i / 放环(1,环号,盘格i) / 抓环倒序(3,r,r) / "
           "暂区(1,i,i) / 码垛同色查账 | Ctrl+C 退出")
 
     seg("第一圈 (批1)")

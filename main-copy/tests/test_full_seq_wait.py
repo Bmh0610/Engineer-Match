@@ -211,7 +211,7 @@ def action_grab_materials(lk, cam, backend, task, wait):
         a, b, c, d = C.IMG2BODY
         print(f"  ✓ 看到: {mat.color} (偏差 右{a*mat.dx+b*mat.dy:+.1f} "
               f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 发 MODE5 组2 抓取放盘")
-        run_action(lk, 2, i + 1, i + 1, C.ACTION_TIMEOUT)   # Y=色序, Z=车上格
+        run_action(lk, 2, 2, i + 1, C.ACTION_TIMEOUT)   # Y=2 恒定取料工位, Z=车上格i+1
     print("\n== 抓料完成 (车全程在锚点位, 账本为零) ==")
 
 

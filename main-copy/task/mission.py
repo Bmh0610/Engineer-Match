@@ -2,7 +2,8 @@
 
 口径(456+321 例, 详见 tests/test_arm_seq.py docstring 验算表):
 - 抓料(组2): 守株待兔——臂缩回复位→定一纠偏建锚→车全程不动, 任务色进窗+连帧稳定
-  即发 (2, i, i)(第 i 个抓到的上盘格 i)。批1/批2 复用本函数(批2 调用时重新定一)。
+  即发 (2, 2, i)。Y=2 恒定=原料区取料工位(全程只此一个抓取点), Z=i=第 i 个抓到
+  的上盘格 i。批1/批2 复用本函数(批2 调用时重新定一)。
 - 放环(组1): 臂回复位→判环找中环→对中环纠偏建锚(唯一底盘动作), 然后逐轮发:
   rough 模式(粗加工区): (1, rings[i], 盘格i)——取盘格 i 的料放 rings[i] 号环;
   buffer 模式(暂存区第一圈): (1, i, i) 恒等正序——盘格 i(=环 i 的料)放暂存位 i,
@@ -25,6 +26,8 @@ ACTION_LABEL = {1: "放环(车→地面)", 2: "抓料(原料区→车)", 3: "抓
 
 def action_label(group, outer, car):
     """一条 MODE5 的中文说明(打印/门控共用)。"""
+    if group == 2:
+        return f"抓料(原料区取料工位{outer}→车): 上盘格{car} ({group},{outer},{car})"
     name = ACTION_LABEL.get(group, f"组{group}")
     return f"{name}: 车外位{outer} ↔ 车上格{car} ({group},{outer},{car})"
 
@@ -173,7 +176,9 @@ def seek_mid_ring(lk, cam, backend, timeout):
 
 def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
     """守株抓料: 臂缩回复位→定一纠偏建锚→车全程不动, 逐色 wait_for_color
-    (进窗+连帧稳定)→组2 (2, i, i)。返回 (ok, total)。"""
+    (进窗+连帧稳定)→组2 (2, 2, i)。Y=2 恒定=原料区取料工位(车不动臂不动,
+    物料由转盘送进夹爪正下方, 全程只有一个抓取点); Z=i=第 i 个抓到的上盘格 i
+    (跳抓不占格)。返回 (ok, total)。"""
     from vision import finder
     print(f"\n===== {batch} 抓料 (守株: 定一后原地等色, 车全程不动) =====")
     arm_move(lk, C.RESET, "缩回复位(定一纠偏位)")
@@ -191,7 +196,7 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
         a, b, c, d = C.IMG2BODY
         print(f"  ✓ 看到: {mat.color} (右{a*mat.dx+b*mat.dy:+.1f} "
               f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 组2 抓取上盘格{i}")
-        if run_action(lk, 2, i, i, C.ACTION_TIMEOUT):
+        if run_action(lk, 2, 2, i, C.ACTION_TIMEOUT):
             ok += 1
     print(f"\n== {batch} 抓料完成 ({ok}/{len(colors)}, 车在锚点位) ==")
     return ok, len(colors)
