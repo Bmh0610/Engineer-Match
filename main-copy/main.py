@@ -1,17 +1,20 @@
-"""main-copy 主状态机: 一键启动(长/短按判出发区) → 导航到码→扫码 → 导航到物料盘 →
-纠偏 → 抓3(进给/退回) → [导航到粗加工→环放置] → 统计。
+"""main-copy 主状态机(两圈比赛流程, MODE5 成套动作版, 2026-11-02 定稿):
+一键启动(长/短按判出发区) → goto 扫码 → goto 物料盘守株抓料(批1) → goto 粗加工区
+放环(G2)+抓环(倒序恒等) → goto 暂存区放环(恒等) → goto 物料盘(返回) → 守株抓料(批2)
+→ goto 粗加工区放环(G4)+抓环 → goto 暂存区码垛(视觉同色叠放) → goto 启停区 → 统计。
 
-State 模式(gcxl 同款): State.execute(ctx) 推进 ctx.current_state。
-行程 = NavDriver 节点式导航(goto, 2026-11-01 起): 每条边"转向对准 → check_edge 摄像头判
-下一条边 → 命中封边重规划(重规划后的新边同样转向后再判) → 前进"; 工作点自动对齐臂朝
-(WORK_HEADING), 物料盘进给/退回(WORK_APPROACH_MM); 旧 drive() 硬编码腿保留备用。
+State 模式(gcxl 同款)。臂动作全走 task/mission.py(MODE5: 上位机只发组号+位号,
+成套动作下位机执行, 等 0x0015); 底盘全走 NavDriver 节点式导航(goto/封边重规划)。
+节点(map.yaml): 1/3=启停区 2=扫码位 6=物料盘 4=粗加工区 8=暂存区。
+视觉引擎分工: 物料/码垛判色=wuliao(MODEL_PATH), 圆环检测=原统一 best.engine
+(MODEL_PATH_RING——用户定: 圆环用原权重), 避障=obstacle(MODEL_PATH_OBSTACLE)。
 
 用法:
-  实车:   python3 main.py --skip-start    # 电控 0x2201/0x2202 未实现, 默认直跑
-  待回执: python3 main.py                 # 等一键启动: 短按(0x2201)=启1, 长按(0x2202)=启2
-  无前相机: --no-check                    # 关闭节点检测(纯跑图)
-  环放置: python3 main.py --skip-start --place-ring
-          # 抓3后导航到粗加工区自动放环(未见环/标定未填自动跳过, 料留盘上)
+  实车:   python3 main.py --skip-start     # 电控 0x2201/0x2202 未实现时默认直跑
+  待回执: python3 main.py                  # 短按(0x2201)=启1, 长按(0x2202)=启2
+  无前相机: --no-check                     # 关闭节点检测(纯跑图)
+  码垛推演: --no-vision                    # 码垛不开相机, 按任务码推演
+  段调试:   --skip-to rough1|buffer1|rough2|stack|home   # 人工摆车+兜底码
 """
 import argparse
 import math
@@ -23,27 +26,18 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 
 import config as C  # noqa: E402
+import task.mission as M  # noqa: E402
+from communication.protocol import Mode  # noqa: E402
+from vision.qr import parse_task  # noqa: E402
 
 
 # ---- 出发点(一键启动长短按, 2026-10-29 电控口径: 短按<2s=0x2201→启1, 长按≥2s=0x2202→启2) ----
 # 摆车约定=车头朝二维码板: 启1 出发车头朝 +y(π/2), 启2 出发朝 -y(-π/2)。
-# start_node/start_heading 本步只记账+打印, 路线消费等导航层(nav_drive)落地后接。
-ZONE_NAME = {1: "启停区1", 3: "启停区2"}    # 节点号=map.yaml 编号(1~9: 启1=1, 启2=3)
+ZONE_NAME = {1: "启停区1", 3: "启停区2"}    # 节点号=map.yaml 编号(1~9)
 START_HEADING = {1: math.pi / 2, 3: -math.pi / 2}
 
-
-# ---- 行程函数(备用: 行程已改 NavDriver 节点式导航, 见 Step1/2) ----
-
-def drive(lk, moves):
-    """逐条 move_v(参数原值 mm/°) 等完成码, 条间 2s。"""
-    from communication.protocol import Mode
-    for i, (x, y, z, label) in enumerate(moves, 1):
-        print(f"-> {label}")
-        lk.send_and_wait(lambda x=x, y=y, z=z: lk.move_v(x, y, z),
-                         Mode.ACK_CHASSIS, C.CMD_TIMEOUT, label)
-        print(f"   ✓ ({i}/{len(moves)})")
-        if i < len(moves):
-            time.sleep(2)
+# 比赛流程节点(map.yaml)
+NODE_SCAN, NODE_MATERIAL, NODE_ROUGH, NODE_BUFFER = 2, 6, 4, 8
 
 
 # ---- 状态机 ----
@@ -51,6 +45,15 @@ def drive(lk, moves):
 class State:
     def execute(self, ctx):
         raise NotImplementedError
+
+
+def _goto(ctx, node, label):
+    """导航到节点; skip-to 调试时 nav=None(人工摆车)只打印跳过。"""
+    if ctx.nav is None:
+        print(f"== [skip-to] 人工摆车, 跳过导航 → {label} (节点{node}) ==")
+        return
+    print(f"== 导航 → {label} (节点{node}) ==")
+    ctx.nav.goto(node)
 
 
 class Step0_WaitStart(State):
@@ -81,9 +84,7 @@ class Step0_WaitStart(State):
 
 
 class Step1_ScanLeg(State):
-    """行程①(导航版): 发车对位 → goto 节点2(自动对齐 车头朝启2/臂朝暂存) → 扫码。
-
-    沿途逐边: 转向对准 → check_edge 摄像头判下一条边 → 命中封边重规划(新边再判)。"""
+    """行程①: goto 节点2 扫码。扫码超时可手动输任务码, 再不行用兜底码。"""
 
     def execute(self, ctx):
         print("== Step1 行程①(导航→扫码) ==")
@@ -91,85 +92,137 @@ class Step1_ScanLeg(State):
         ctx.nav = NavDriver(ctx.lk, ctx.watcher, "navigation/map.yaml",
                             ctx.start_node, ctx.start_heading)
         ctx.nav.launch()
-        ctx.nav.goto(2)
+        ctx.nav.goto(NODE_SCAN)
         task = ctx.scanner.scan_from_camera(ctx.scan_cam, C.SCAN_TIMEOUT)
         if task is None:
-            from vision.qr import parse_task
-            task = parse_task(C.DEFAULT_TASK_CODE)
-            print(f"  !! 扫码超时, 用兜底码 {C.DEFAULT_TASK_CODE}")
+            try:
+                code = input(f"  !! 扫码超时; 手动输任务码"
+                             f"(回车=兜底 {C.DEFAULT_TASK_CODE}): ").strip()
+            except EOFError:
+                code = ""
+            task = parse_task(code) if code else None
+            if task is None:
+                task = parse_task(C.DEFAULT_TASK_CODE)
+                print(f"  用兜底码 {C.DEFAULT_TASK_CODE}")
         ctx.task = task
-        print(f"  任务码: {task['raw']} | 批1: {task['batch1_colors']}"
-              f" 环{task['batch1_rings']}")
-        ctx.current_state = Step2_ApproachLeg()
+        print(f"  任务码: {task['raw']} | 批1 {task['batch1_colors']} 环{task['batch1_rings']}"
+              f" | 批2 {task['batch2_colors']} 环{task['batch2_rings']}")
+        ctx.current_state = Step2_Leg1Grab()
 
 
-class Step2_ApproachLeg(State):
-    """行程②(导航版): goto 节点6 物料盘(自动对齐臂朝转盘)。"""
-
-    def execute(self, ctx):
-        print("== Step2 行程②(导航→物料盘) ==")
-        ctx.nav.goto(6)
-        ctx.current_state = Step3_Align()
-
-
-class Step3_Align(State):
-    """纠偏(定一): 目标=离主点最近的物料, 等停歇(稳定帧内置)。"""
+class Step2_Leg1Grab(State):
+    """批1 抓料: goto 节点6 → 守株(定一纠偏建锚+等色)→组2。"""
 
     def execute(self, ctx):
-        print("== Step3 连续自动纠偏 ==")
-        ctx.grab.align()
-        ctx.current_state = Step4_Grab3()
+        _goto(ctx, NODE_MATERIAL, "物料盘")
+        ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
+                                   ctx.task["batch1_colors"], ctx.grab_wait, "批1")
+        ctx.stats.append(("批1抓料", ok, tot))
+        ctx.current_state = Step3_Leg1Rough()
 
 
-class Step4_Grab3(State):
-    """抓3: 工作点进给(x+100) → 每停歇窗口重判角色定点抓放(总回执 23) → 退回节点。"""
-
-    def execute(self, ctx):
-        print("== Step4 抓3(判色位→固定点位抓放, 计数23) ==")
-        from task.nav_drive import WORK_APPROACH_MM
-        mm = WORK_APPROACH_MM.get(6, 0)
-        if mm:
-            ctx.nav.approach(mm)     # 纠偏前进给(臂侧横移, 图外不入图)
-        ctx.placed_colors = ctx.grab.run_grab3(ctx.task)
-        if mm:
-            ctx.nav.retreat(mm)      # 抓完退回节点位, 再转向去下一段
-        ctx.current_state = Step5_PlaceRing() if ctx.place_ring else Step6_Done()
-
-
-class Step5_PlaceRing(State):
-    """环放置(导航到粗加工区, 定一式): goto 节点4(臂朝环区) → 对画面中间环纠偏 → 查位放3。
-
-    未见环/标定未填/环号超3都跳过, 料留盘上。
-    """
+class Step3_Leg1Rough(State):
+    """批1 粗加工区: goto 节点4 → 放环(G2 序)+抓环(倒序恒等)。"""
 
     def execute(self, ctx):
-        print("== Step5 环放置(导航→粗加工区, 定一+查表, 计数25) ==")
-        ctx.nav.goto(4)
-        ctx.place.run_place3(ctx.task, ctx.placed_colors)
-        ctx.current_state = Step6_Done()
+        _goto(ctx, NODE_ROUGH, "粗加工区")
+        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
+                                ctx.task["batch1_rings"], C.ACTION_TIMEOUT, mode="rough")
+        ok2, t2 = M.grab_rings(ctx.lk, ctx.task["batch1_rings"], C.ACTION_TIMEOUT)
+        ctx.stats += [("批1放环", ok1, t1), ("批1抓环", ok2, t2)]
+        ctx.current_state = Step4_Leg1Buffer()
 
 
-class Step6_Done(State):
+class Step4_Leg1Buffer(State):
+    """批1 暂存区: goto 节点8 → 放环(恒等, 盘格i→位i, 零账本)。"""
+
     def execute(self, ctx):
-        s, p = ctx.grab.stats, ctx.place.stats
-        extra = f" 放 {p['place_ok']}/{p['place_total']}" if ctx.place_ring else ""
-        print(f"== 完成: 抓 {s['grab_ok']}/{s['grab_total']}{extra} ==")
+        _goto(ctx, NODE_BUFFER, "暂存区")
+        ok, tot = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
+                                ctx.task["batch1_rings"], C.ACTION_TIMEOUT, mode="buffer")
+        ctx.stats.append(("批1暂存区放环", ok, tot))
+        ctx.current_state = Step5_Leg2Grab()
+
+
+class Step5_Leg2Grab(State):
+    """批2: goto 节点6 返回物料盘 → 守株抓料(重新定一纠偏)。"""
+
+    def execute(self, ctx):
+        _goto(ctx, NODE_MATERIAL, "物料盘(返回)")
+        ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
+                                   ctx.task["batch2_colors"], ctx.grab_wait, "批2")
+        ctx.stats.append(("批2抓料", ok, tot))
+        ctx.current_state = Step6_Leg2Rough()
+
+
+class Step6_Leg2Rough(State):
+    """批2 粗加工区: goto 节点4 → 放环(G4 序)+抓环(倒序恒等)。"""
+
+    def execute(self, ctx):
+        _goto(ctx, NODE_ROUGH, "粗加工区")
+        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
+                                ctx.task["batch2_rings"], C.ACTION_TIMEOUT, mode="rough")
+        ok2, t2 = M.grab_rings(ctx.lk, ctx.task["batch2_rings"], C.ACTION_TIMEOUT)
+        ctx.stats += [("批2放环", ok1, t1), ("批2抓环", ok2, t2)]
+        ctx.current_state = Step7_Leg2Stack()
+
+
+class Step7_Leg2Stack(State):
+    """批2 暂存区码垛: goto 节点8 → 视觉识别环上物料色+盘上账本定格, 同色叠批1 上方。
+    --no-vision 时按任务码推演(不开相机不纠偏)。"""
+
+    def execute(self, ctx):
+        _goto(ctx, NODE_BUFFER, "暂存区")
+        ok, tot = M.stack_rings(ctx.lk, ctx.end_cam, ctx.backend, ctx.task,
+                                C.ACTION_TIMEOUT, use_vision=not ctx.no_vision)
+        ctx.stats.append(("批2码垛", ok, tot))
+        ctx.current_state = Step8_ReturnHome()
+
+
+class Step8_ReturnHome(State):
+    """回启停区: goto 出发节点(启1=1 / 启2=3)。"""
+
+    def execute(self, ctx):
+        _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)")
+        ctx.current_state = Step9_Done()
+
+
+class Step9_Done(State):
+    def execute(self, ctx):
+        print("== 两圈完成, 统计 ==")
+        for name, ok, tot in ctx.stats:
+            print(f"  {name}: {ok}/{tot}")
         ctx.current_state = None
 
 
 class Context:
-    def __init__(self, lk, grab, place, scanner, scan_cam, watcher,
-                 skip_start=False, place_ring=False, start_node=None):
-        self.lk, self.grab, self.place = lk, grab, place
-        self.scanner, self.scan_cam = scanner, scan_cam
+    SKIP = {"rough1": Step3_Leg1Rough, "buffer1": Step4_Leg1Buffer,
+            "rough2": Step6_Leg2Rough, "stack": Step7_Leg2Stack,
+            "home": Step8_ReturnHome}
+
+    def __init__(self, lk, scanner, scan_cam, end_cam, backend, backend_ring,
+                 watcher, skip_start=False, start_node=None, grab_wait=60.0,
+                 no_vision=False, skip_to=None):
+        self.lk, self.scanner, self.scan_cam = lk, scanner, scan_cam
+        self.end_cam, self.backend = end_cam, backend
+        self.backend_ring = backend_ring   # 圆环检测(原统一 best.engine, place_rings 用)
         self.watcher = watcher          # ObstacleWatcher(前相机+障碍引擎); None=纯跑图
         self.nav = None                 # Step1 构建 NavDriver(须先 launch 再 goto)
-        self.skip_start, self.place_ring = skip_start, place_ring
-        self.start_node = start_node   # None=未定(等按键); 1=启1, 3=启2 (map.yaml 节点号)
-        self.start_heading = None      # Step0 定出发点后按 START_HEADING 填
+        self.skip_start, self.start_node = skip_start, start_node
+        self.start_heading = None
+        self.grab_wait, self.no_vision = grab_wait, no_vision
         self.task = None
-        self.placed_colors = None
-        self.current_state = Step0_WaitStart()
+        self.stats = []                 # [(名称, ok, total)]
+        if skip_to and skip_to != "start":
+            self.start_node = start_node or 1      # 段调试默认按启1 摆车(回程 goto 用)
+            self.start_heading = START_HEADING[self.start_node]
+            self.task = parse_task(C.DEFAULT_TASK_CODE)   # 段调试: 人工摆车+兜底码
+            print(f"[skip-to {skip_to}] 出发点={ZONE_NAME[self.start_node]} "
+                  f"兜底码 {C.DEFAULT_TASK_CODE}"
+                  f" (批1 {self.task['batch1_colors']} 环{self.task['batch1_rings']})")
+            self.current_state = self.SKIP[skip_to]()
+        else:
+            self.current_state = Step0_WaitStart()
 
     def run(self):
         while self.current_state is not None:
@@ -177,27 +230,31 @@ class Context:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="智能搬运主状态机")
+    ap = argparse.ArgumentParser(description="智能搬运主状态机(两圈 MODE5 版)")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
+    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
+                    help="圆环检测引擎(=原统一 best.engine——用户定: 圆环用原权重)")
     ap.add_argument("--skip-start", action="store_true",
                     help="跳过一键启动等待(电控 0x2201/0x2202 未实现时用)")
     ap.add_argument("--start-node", type=int, choices=(1, 3), default=None,
                     help="出发点: 1=启停区1, 3=启停区2; --skip-start 时生效(默认1), "
                          "否则以一键启动长短按为准")
-    ap.add_argument("--place-ring", action="store_true",
-                    help="抓3后导航到粗加工区接环放置")
     ap.add_argument("--no-check", action="store_true",
                     help="关闭节点检测(无前相机/纯跑图用; 默认开启——节点上摄像头判下一条边)")
-    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
-                    help="环检测模型(与物料模型可拆分)")
+    ap.add_argument("--no-vision", action="store_true",
+                    help="码垛不开相机, 按任务码推演(未接末端相机/联调)")
+    ap.add_argument("--wait", type=float, default=60.0,
+                    help="守株抓料单色等待超时(秒, 默认60; 比赛值按转盘一圈周期调)")
+    ap.add_argument("--skip-to", choices=("start", "rough1", "buffer1",
+                                          "rough2", "stack", "home"),
+                    default="start",
+                    help="start=全程(默认); 其余=人工摆车从该段动作组起跑(兜底码)")
     args = ap.parse_args()
 
     from vision.camera import Camera
     from vision.detect import YOLOBackend
-    from task.grab import StepGrab
-    from task.ring import StepRing
-    from communication.protocol import Link, Mode
+    from communication.protocol import Link
     from vision.qr import QrScanner
 
     scan_cam = Camera(C.CAMERA_ID_SCAN, "scan")
@@ -221,16 +278,15 @@ def main():
         watcher = ObstacleWatcher(obstacle_backend, front_cam, calib)
     else:
         print("节点检测已关闭(--no-check): 纯跑图")
-    print(f"加载模型 {args.model} ...")
-    backend = YOLOBackend(args.model)
-    backend_ring = YOLOBackend(args.model_ring) if args.place_ring else None
+    print(f"加载物料模型 {args.model} / 圆环模型 {args.model_ring} ...")
+    backend = YOLOBackend(args.model)              # 物料/码垛判色(wuliao 引擎)
+    backend_ring = YOLOBackend(args.model_ring)    # 圆环检测(原统一 best.engine)
     lk = Link(args.port)
 
-    grab = StepGrab(lk, end_cam, backend)
-    place = StepRing(lk, end_cam, backend_ring)
-    ctx = Context(lk, grab, place, QrScanner(), scan_cam, watcher,
-                  skip_start=args.skip_start, place_ring=args.place_ring,
-                  start_node=args.start_node)
+    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend, backend_ring,
+                  watcher, skip_start=args.skip_start, start_node=args.start_node,
+                  grab_wait=args.wait, no_vision=args.no_vision,
+                  skip_to=args.skip_to)
     try:
         ctx.run()
     except RuntimeError as e:   # 硬失败: 通信静默(不重发策略)

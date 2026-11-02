@@ -6,8 +6,8 @@
 稳定即发); 单色等待超时默认 60s(--wait 可改; 比赛值按实车转盘一圈周期调,
 建议≥1.5圈), 超时跳过该色槽位不推进(保完赛)。
 
-其余(腿/扫码/放环 MODE5 组1 车→地面/抓环 MODE5 组3 地面→车/判环找中环/
-对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
+其余(腿/扫码/放环 MODE5 组1 车上格z→地面y / 抓环 MODE5 组3 倒序恒等 环r→盘格r /
+判环找中环/对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
 
 流程: 右移150→前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90→【守株抓料】
 →逆转90→前进920→前进850→逆转90→【放环】【抓环】(粗加工区)→后退820→顺转90
@@ -217,31 +217,39 @@ def action_grab_materials(lk, cam, backend, task, wait):
 
 # ---- 动作组②: 放环(盘→环, MODE5 组1: 车→地面) ----
 
-def action_place_rings(lk, cam, backend, task, timeout):
-    """放环×3轮: 判环找中环+对中环纠偏建锚(唯一底盘动作) → MODE5 组1(车→地面)。"""
-    print("\n===== 动作组②: 放环 (MODE5 组1: 车→地面) =====")
+def action_place_rings(lk, cam, backend, task, timeout, mode="rough"):
+    """放环×3轮: 判环找中环+对中环纠偏建锚(唯一底盘动作) → MODE5 组1(车→地面)。
+    rough(粗加工区): (1, rings[i], 盘格i) 按任务码环号序; buffer(暂存区, 第一圈):
+    (1, i, i) 恒等正序——抓环恒等后盘格i=环i的料, 恰满足 G2 两区同位(零账本)。"""
+    print(f"\n===== 动作组②: 放环 (MODE5 组1: 车→地面, "
+          f"{'任务码环号序' if mode == 'rough' else '恒等'}) =====")
     arm(lk, "回复位", C.RESET, auto=True)
     _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
     _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout, auto=True)
-    for i, (color, ring_no) in enumerate(
-            zip(task["batch1_colors"], task["batch1_rings"])):
-        pos_name = {1: "左", 2: "中", 3: "右"}[ring_no]
-        print(f"\n----- 放 {color} → {ring_no} 号环({pos_name}位) -----")
-        run_action(lk, 1, ring_no, 0, C.ACTION_TIMEOUT)   # 组1: 车上→地面环号位
+    rings = task["batch1_rings"]
+    if mode == "rough":
+        seq = [(ring_no, i, task["batch1_colors"][i - 1])
+               for i, ring_no in enumerate(rings, 1)]
+    else:
+        seq = [(i, i, task["batch1_colors"][i - 1]) for i in range(1, len(rings) + 1)]
+    for y, z, color in seq:
+        pos_name = {1: "左", 2: "中", 3: "右"}[y]
+        print(f"\n----- 放 {color} → 环{y}({pos_name}位), 取盘格{z} -----")
+        run_action(lk, 1, y, z, C.ACTION_TIMEOUT)   # 组1: 车上格z → 地面y号位
     print("\n== 放环完成 (车在中环锚点位) ==")
 
 
 # ---- 动作组③: 抓环(环→盘, MODE5 组3: 地面→车) ----
 
 def action_grab_rings(lk, task, timeout):
-    """抓环×3轮(纯记忆不开视觉): 按放环的环号序 MODE5 组3(地面→车)取回原盘格。"""
-    print("\n===== 动作组③: 抓环 (MODE5 组3: 地面→车) =====")
-    for i, (color, ring_no) in enumerate(
-            zip(task["batch1_colors"], task["batch1_rings"])):
-        pos_name = {1: "左", 2: "中", 3: "右"}[ring_no]
-        print(f"\n----- 抓 {ring_no} 号环({pos_name}位) → 车上格{i + 1} -----")
-        run_action(lk, 3, ring_no, i + 1, C.ACTION_TIMEOUT)   # 组3: 地面环号位→车上格
+    """抓环×3轮(纯记忆不开视觉): 倒序恒等 MODE5 组3——环 r → 盘格 r,
+    按环号从大到小取(环3→盘3、环2→盘2、环1→盘1)。"""
+    print("\n===== 动作组③: 抓环 (MODE5 组3: 地面→车, 倒序恒等) =====")
+    for r in sorted(set(task["batch1_rings"]), reverse=True):
+        pos_name = {1: "左", 2: "中", 3: "右"}[r]
+        print(f"\n----- 抓 {r} 号环({pos_name}位) → 车上格{r} -----")
+        run_action(lk, 3, r, r, C.ACTION_TIMEOUT)   # 组3: 地面r号位→车上格r
     print("\n== 抓环完成 (车在中环锚点位, 纯记忆) ==")
 
 
@@ -267,6 +275,8 @@ def main():
     ap = argparse.ArgumentParser(description="整场流程联调·守株待兔抓取版")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
+    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
+                    help="环检测引擎(默认=原统一 best.engine——用户定: 圆环用原权重)")
     ap.add_argument("--skip-to", choices=("start", "rough", "buffer", "home"),
                     default="start",
                     help="start=全流程(默认); rough/buffer=从该区动作组起跑"
@@ -284,8 +294,9 @@ def main():
 
     cam = Camera(C.CAMERA_ID_END, "end")
     cam.open()
-    print(f"加载模型 {args.model} ...")
-    backend = YOLOBackend(args.model)
+    print(f"加载物料模型 {args.model} / 环模型 {args.model_ring} ...")
+    backend = YOLOBackend(args.model)           # 物料(wuliao 引擎)
+    backend_ring = YOLOBackend(args.model_ring)  # 圆环(原统一 best.engine)
     lk = Link(args.port)
     print(f"口径: 观察{C.OBSERVE} 复位{C.RESET} 最大伸{C.ARM_REACH_MAX} "
           f"行距{C.TURN_STEP_MM} 放/抓环高{C.H_PLACE_RING}/{C.H_GRAB_RING} "
@@ -309,7 +320,7 @@ def main():
     if args.skip_to in ("start", "rough"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        action_place_rings(lk, cam, backend, task, args.timeout)
+        action_place_rings(lk, cam, backend_ring, task, args.timeout)
         action_grab_rings(lk, task, args.timeout)
         leg_move(lk, 0, -820, 0, "后退820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
@@ -317,7 +328,7 @@ def main():
     if args.skip_to in ("start", "rough", "buffer"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        action_place_rings(lk, cam, backend, task, args.timeout)
+        action_place_rings(lk, cam, backend_ring, task, args.timeout)
         action_grab_rings(lk, task, args.timeout)
     if args.skip_to in ("start", "rough", "buffer", "home"):
         leg_move(lk, 0, -850, 0, "后退850")

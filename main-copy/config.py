@@ -132,8 +132,9 @@ GRAB_ACK_TOTAL = 23   # 3颗总回执: 近端7 + 端位8×2 = 23(0x0012×17 + 0x
 # ---- 环放置(粗加工区, 定一式: 对画面中间的环整车纠偏一次, 颗间只动臂查表放) ----
 # 数字→位置映射: 检出=YOLO 数字类判定(不按位置猜); 未检出数字按默认次序(1,2,3)
 # 填空位+告警。环模型与物料模型分开部署/重训, 检测前端独立于 finder(防权重混淆)。
-MODEL_PATH_RING = "/home/popcorn-car/main-copy/vision/wuliao-best.engine"   # 环检测模型=与
-                                # 物料同一引擎(circle1/2/3 在 wuliao 10 类里); 分开重训后改这
+MODEL_PATH_RING = "/home/popcorn-car/main-copy/vision/best.engine"   # 环检测=原统一权重
+                                # best.engine(2026-11-02 用户定: 圆环用原权重, 环类 7/8/9
+                                # 与 RING_CLS 对齐); 笔记本调试改旧 best.pt
 RING_CLS = {1: 7, 2: 8, 3: 9}   # 数字→模型类别号(共用现 10 类模型=circle1/2/3;
                                 # 拆分重训后按新模型类别 id 改, 如 {1:0, 2:1, 3:2})
 RING_CONF = 0.4                 # 数字环检出门槛(贴纸数字小, 比物料 0.5 放宽)
