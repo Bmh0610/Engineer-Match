@@ -27,15 +27,18 @@ class Camera:
 
     def open(self):
         dev = self.dev
-        if isinstance(dev, str) and not dev.isdigit():
-            # udev 别名(/dev/cam_*) → 解析当前实际节点号(V4L2 后端只认数字)
-            import os
-            import re
-            real = os.path.realpath(dev)
-            m = re.search(r"video(\d+)$", real)
-            if not m:
-                raise RuntimeError(f"相机 {dev} 解析不到 video 节点: {real}")
-            dev = int(m.group(1))
+        if isinstance(dev, str):
+            if dev.isdigit():
+                dev = int(dev)   # 纯数字字符串→设备号(否则 VideoCapture 会当文件路径打开失败)
+            else:
+                # udev 别名(/dev/cam_*) → 解析当前实际节点号(V4L2 后端只认数字)
+                import os
+                import re
+                real = os.path.realpath(dev)
+                m = re.search(r"video(\d+)$", real)
+                if not m:
+                    raise RuntimeError(f"相机 {dev} 解析不到 video 节点: {real}")
+                dev = int(m.group(1))
         self.cap = cv2.VideoCapture(dev)
         if not self.cap.isOpened():   # 不存在/被占用/权限不足时显式报错, 别静默黑屏
             raise RuntimeError(
