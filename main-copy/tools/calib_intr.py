@@ -5,7 +5,8 @@
       空格存图(角点找全才存), 采 15-20 张: 棋盘占画面 1/3-2/3、±30-45° 倾斜
       姿态多样、平移覆盖四角(带倾斜也避摩尔纹), 每姿态停稳再拍。
 标定: python3 tools/calib_intr.py --calibrate --dir /tmp/calib --square 20.0
-      RMS<0.8 存 tools/calib_end.yaml; 0.8-1.5 存并警告; >1.5 拒存
+      RMS<0.8 存 tools/--out 指定 yaml(默认 calib_end.yaml, 前视避障相机
+      用 --out calib_front.yaml); 0.8-1.5 存并警告; >1.5 拒存
       (可 --force 强制保存); fx 前后半稳定性差异>40% 同样拒存。
 验证: python3 tools/calib_intr.py --verify --cam 0
       画面中心(蓝) vs 标定主点(红)双十字; 右图里的直线应该真的直。
@@ -198,7 +199,7 @@ def run_calibrate(args):
     out = {"fx": float(fx), "fy": float(fy), "cx": float(cx), "cy": float(cy),
            "dist": [float(v) for v in dist.ravel()], "rms": float(rms)}
     VISION_DIR.mkdir(parents=True, exist_ok=True)
-    path = VISION_DIR / "calib_end.yaml"
+    path = VISION_DIR / args.out
     path.write_text(yaml.safe_dump(out, sort_keys=False), encoding="utf-8")
     print(f"已保存 {path}  [{'合格' if rms < 0.8 else 'RMS 偏大, 建议重拍'}]")
 
@@ -206,9 +207,9 @@ def run_calibrate(args):
 def run_verify(args):
     sys.path.insert(0, str(BASE))
     import calib
-    c = calib.load()
+    c = calib.load(args.calib)
     if c is None:
-        sys.exit("无 tools/calib_end.yaml, 先 --calibrate")
+        sys.exit(f"无内参文件 {args.calib or 'tools/calib_end.yaml'}, 先 --calibrate")
     cam = Camera(args.cam, "calib")
     cam.open()
     print(f"RMS={c.rms:.2f}px | 左=原图 右=去畸变 | 蓝十字=画面中心 "
@@ -255,6 +256,10 @@ def main():
                     help="采图纯终端模式: 无窗口, 状态打在终端, 自动存图")
     ap.add_argument("--force", action="store_true",
                     help="验收不过也强制保存(打印警告)")
+    ap.add_argument("--out", default="calib_end.yaml",
+                    help="--calibrate 结果文件名(存 tools/ 下; 前视避障相机用 calib_front.yaml)")
+    ap.add_argument("--calib", default=None,
+                    help="--verify 读的内参路径(默认 tools/calib_end.yaml)")
     args = ap.parse_args()
     if args.calibrate and not args.square:
         ap.error("--calibrate 需要 --square(实测方格毫米值)")
