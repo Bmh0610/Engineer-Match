@@ -46,6 +46,8 @@ def main():
     ap.add_argument("--cam", type=int, default=0)
     ap.add_argument("--ring", action="store_true",
                     help="环面标定模式: 打印 PX_PER_MM_RING(在环观测位姿下跑)")
+    ap.add_argument("--stack", action="store_true",
+                    help="码垛面标定模式: 打印 PX_PER_MM_STACK(在码垛纠偏位姿下跑)")
     args = ap.parse_args()
 
     cam = Camera(args.cam, "ratio")
@@ -121,8 +123,12 @@ def main():
         print(f"\n== 结果 ==\npx_per_mm = {mean:.3f} ± {std:.3f}  (n={len(samples)})")
         if std / mean > 0.05:
             print("!! 离散度 >5%: 各次测量差异大(点的位置/长度输入有误或高度变了), 建议重测")
-        name = "PX_PER_MM_RING" if args.ring else "PX_PER_MM"
-        where = "config 环放置段" if args.ring else "config 标定段"
+        if args.stack:
+            name, where = "PX_PER_MM_STACK", "config 码垛段"
+        elif args.ring:
+            name, where = "PX_PER_MM_RING", "config 环放置段"
+        else:
+            name, where = "PX_PER_MM", "config 标定段"
         print(f"填入 {where}:  {name} = {mean:.3f}")
         if _CAL is not None:
             print(f"交叉验证: 相机离面高度mm 应 ≈ fx / {mean:.3f} = {_CAL.fx / mean:.0f}")
