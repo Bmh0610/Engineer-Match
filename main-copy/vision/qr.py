@@ -35,6 +35,26 @@ def parse_task(raw):
             "stack_plan": dict(zip(b1c, [int(d) for d in g2]))}
 
 
+SIMPLE_PATTERN = re.compile(r"^([1-6]{3})\+([1-5]{3})$")   # 2组简写: 色序+环号
+
+
+def parse_test_code(raw):
+    """测试码解析: 4 组完整码走 parse_task; 2 组简写(色序+环号, 只跑第一批)
+    补 batch2 空占位; 格式非法返回 None。"""
+    task = parse_task(raw)
+    if task:
+        return task
+    m = SIMPLE_PATTERN.match(raw.strip()) if raw else None
+    if not m:
+        return None
+    colors = [RULE_DIGIT2COLOR[d] for d in m.group(1)]
+    rings = [int(d) for d in m.group(2)]
+    return {"raw": raw.strip(),
+            "batch1_colors": colors, "batch1_rings": rings,
+            "batch2_colors": [], "batch2_rings": [],
+            "stack_plan": dict(zip(colors, rings))}
+
+
 class QrScanner:
     """cv2 二维码检测(核心移植自 gcxl detect.py:692-800)。"""
 

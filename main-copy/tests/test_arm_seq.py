@@ -1,120 +1,157 @@
-"""MODE5 成套动作序列测试: 解析任务码 → 按色序抓料上盘 → 按环号放环。
+"""MODE5 成套动作两圈全序列测试(2026-11-02 定稿口径)。
 
-任务码兼容两种形态:
-  4组完整码 213+321+456+123: 两批料(第1/3组=抓料色序, 第2/4组=放环环号), 走 qr.parse_task;
-  2组简写   213+321:        只跑第一批料(第1组=抓料色序, 第2组=放环环号), 本地解析。
-例 213+321: 抓料 黄→盘1、红→盘2、蓝→盘3; 放环 盘1→环3、盘2→环2、盘3→环1。
+任务码执行前交互输入一次(空回车=默认): 4 组完整码=两圈全跑, 2 组简写=只跑第一圈。
 
-用法: python3 tests/test_arm_seq.py [--code 213+321] [--timeout 35]
-每条 MODE5 逐条回车执行(下位机执行整套臂动作), 等 0x0015 完成回执;
-超时告警跳过该条(不盲目重发——重发会让动作再做一遍); Ctrl+C 退出。
+序列(456+321 例, 全程零账本——环位是固定靶位, 放环后每环内容即任务码推演的确定结果):
+  ①抓料   组2 (2,i,i) i=1..3    视觉判序, 第 i 个抓到的上盘格 i
+  ②粗区放环 组1 (1,G2[i],i)     盘格i → 环G2[i]
+  ③粗区抓环 组3 (3,r,r) r=3,2,1 倒序恒等: 环r→盘格r(纯记忆, 数字被物料挡)
+  ④暂区放环 组1 (1,i,i) i=1..3  盘格i→暂存位i(恒等恰=G2 两区同位, 零账本)
+  ⑤~⑦批2  同①~③(放环用 G4)
+  ⑧码垛   组1: 开末端相机识别环上物料色(左/中/右=位1/2/3)定 Y, 盘上账本
+                (盘格z 色=G3[G4.index(z)])定 Z, 同色叠批1上方;
+                --no-vision 时按 (1, stack_plan[色], G4[k]) 纯推演。
+
+用法: python3 tests/test_arm_seq.py [--code 213+321] [--no-vision] [--timeout 35]
+213+321 → 12 条; 213+321+312+231 → 24 条(码垛须批1/批2 同三色, 规则约束)。
+段间打印【实车此处需行车】提示(本文件不发底盘帧, 行车走 main.py/NavDriver)。
+每条回车执行等 0x0015; 超时告警跳过不重发(重发会让动作再做一遍); Ctrl+C 退出。
 """
-import re
 import sys
-import time
 from pathlib import Path
 
 BASE = str(Path(__file__).resolve().parent.parent)   # main-copy 根(双端通用)
 sys.path.insert(0, BASE)
 
 import config as C  # noqa: E402
-from communication.protocol import Mode, frame  # noqa: E402
-from vision.qr import RULE_DIGIT2COLOR, parse_task  # noqa: E402
-
-SIMPLE_PATTERN = re.compile(r"^([1-6]{3})\+([1-5]{3})$")   # 2组简写: 色序+环号
-
-
-def parse_test_code(raw):
-    """测试码解析: 4组完整码走 parse_task; 2组简写补 batch2 空占位; 非法 None。"""
-    task = parse_task(raw)
-    if task:
-        return task
-    m = SIMPLE_PATTERN.match(raw.strip()) if raw else None
-    if not m:
-        return None
-    colors = [RULE_DIGIT2COLOR[d] for d in m.group(1)]
-    return {"raw": raw.strip(),
-            "batch1_colors": colors, "batch1_rings": [int(d) for d in m.group(2)],
-            "batch2_colors": [], "batch2_rings": [],
-            "stack_plan": dict(zip(colors, [int(d) for d in m.group(2)]))}
-
-
-ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
-            Mode.ACK_GRIPPER: "0x0013夹爪", Mode.ACK_ACTION: "0x0015成套动作"}
+import task.mission as M  # noqa: E402
+from vision.qr import parse_test_code  # noqa: E402  (见 qr.py: 兼容 2 组简写)
 
 _STEP = [0]
 
 
-def confirm(msg):
+def seg(title):
+    """段标题 + 步号清零。"""
+    _STEP[0] = 0
+    print(f"\n{'='*8} {title} {'='*8}")
+
+
+def run(lk, group, outer, car, timeout):
+    """带步号的逐条门控 MODE5。"""
+    _STEP[0] += 1
     try:
-        input(f"\n[{_STEP[0]}] <- 回车: {msg}")
+        input(f"[{_STEP[0]}] <- 回车: {M.action_label(group, outer, car)}")
     except EOFError:
         pass
+    return M.run_action(lk, group, outer, car, timeout)
 
 
-def label_debug(group, outer, car):
-    """打印用说明: 按动作组给一句中文。"""
-    return {2: f"抓料: 原料区位{outer} → 车上格{car}",
-            1: f"放环: 车上格{car} → 环{outer}",
-            3: f"抓环: 环{outer} → 车上格{car}"}.get(
-        group, f"组{group}: 外位{outer} 车上格{car}")
+def grab_seg(lk, args, colors, batch="①"):
+    """抓料段: 组2 (2, i, i)。"""
+    seg(f"{batch} 抓料 色序={colors}")
+    for i in range(1, len(colors) + 1):
+        run(lk, 2, i, i, args.timeout)
 
 
-def run_action(lk, group, outer, car, timeout):
-    """发 MODE5 成套动作, 等 0x0015 完成回执; 超时告警跳过(不盲目重发——
-    文档警告重发会让动作再做一遍)。"""
-    _STEP[0] += 1
-    tx = frame(Mode.ACTION, int(group), int(outer), int(car))
-    confirm(f"{label_debug(group, outer, car)}\n  hex={tx.hex(' ').upper()}")
-    lk.flush()
-    lk.ser.write(tx)
-    t0 = time.time()
-    got = None
-    while time.time() - t0 < timeout:
-        for f in lk.poll():
-            print(f"    RX {f}")
-            if f.mode == Mode.ACK_ACTION and got is None:
-                got = f
-        if got:
-            break
-        time.sleep(0.05)
-    if got:
-        print(f"    ✓ 成套动作完成 ({time.time()-t0:.1f}s)")
-    else:
-        print(f"    !! {timeout:.0f}s 未收到 0x0015 完成回执 —— 告警跳过"
-              f"(不盲目重发: 若指令实际在执行, 重发会重复抓放)")
-    time.sleep(2)
+def place_seg(lk, args, rings, batch="②"):
+    """粗区放环段: 组1 (1, rings[i], 盘格i)。"""
+    seg(f"{batch} 粗区放环 环号={rings}")
+    for i, r in enumerate(rings, 1):
+        run(lk, 1, r, i, args.timeout)
+
+
+def grab_rings_seg(lk, args, rings, batch="③"):
+    """粗区抓环段: 组3 倒序恒等 (3, r, r)。"""
+    order = sorted(set(rings), reverse=True)
+    seg(f"{batch} 粗区抓环(倒序恒等) 环{'→'.join(map(str, order))}")
+    for r in order:
+        run(lk, 3, r, r, args.timeout)
+
+
+def buffer_seg(lk, args, rings, batch="④"):
+    """暂存区放环段(第一圈): 组1 恒等正序 (1, i, i)。"""
+    seg(f"{batch} 暂存区放环(恒等) 盘i→位i")
+    for i in range(1, len(rings) + 1):
+        run(lk, 1, i, i, args.timeout)
+
+
+def stack_seg(lk, args, task):
+    """码垛段(第二圈): 组1 同色叠放, 视觉/推演两版。"""
+    seg(f"⑧ 暂存区码垛 (批2={task['batch2_colors']}, "
+        f"{'任务码推演' if args.no_vision else '视觉识别'})")
+    if args.no_vision:
+        M.stack_rings(lk, None, None, task, args.timeout,
+                      use_vision=False, gated=True)
+        return
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
+    cam = Camera(C.CAMERA_ID_END, "end")
+    cam.open()
+    print(f"加载模型 {args.model} ...")
+    backend = YOLOBackend(args.model)
+    M.stack_rings(lk, cam, backend, task, args.timeout, use_vision=True, gated=True)
+
+
+def drive_hint(txt):
+    print(f"\n>>>>> 【实车此处需行车】{txt} (本测试不发底盘帧) <<<<<\n")
 
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description="MODE5 成套动作序列测试")
+    ap = argparse.ArgumentParser(description="MODE5 两圈成套动作序列测试")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--code", default="213+321",
-                    help="任务码: 4组完整码或2组简写(色序+环号)")
+                    help="默认任务码(执行前交互输入可覆盖, 空回车=用此默认)")
     ap.add_argument("--timeout", type=float, default=35.0,
                     help="单条 MODE5 等完成回执超时(秒)")
+    ap.add_argument("--no-vision", action="store_true",
+                    help="码垛段不开相机, 按任务码推演(无车冒烟/未接相机)")
+    ap.add_argument("--model", default=C.MODEL_PATH, help="物料模型(码垛视觉用)")
     args = ap.parse_args()
 
     from communication.protocol import Link
+
+    # 执行前交互输入一次任务码(空回车=默认)
+    try:
+        code = input(f"任务码[{args.code}]: ").strip()
+    except EOFError:
+        code = ""
+    if code:
+        args.code = code
 
     task = parse_test_code(args.code)
     if task is None:
         print(f"!! 任务码 {args.code} 格式非法, 退出")
         return
     lk = Link(args.port)
-    colors, rings = task["batch1_colors"], task["batch1_rings"]
-    print(f"任务码 {task['raw']} | 抓料色序 {colors} | 放环环号 {rings}")
-    print("口径: 原料区位 i 的料 → 盘格 i → 环 任务码环号位 | 每条回车, Ctrl+C 退出\n")
+    c1, r1 = task["batch1_colors"], task["batch1_rings"]
+    two = bool(task["batch2_colors"])
+    print(f"任务码 {task['raw']} | 批1 色{c1} 环{r1}"
+          + (f" | 批2 色{task['batch2_colors']} 环{task['batch2_rings']}" if two else ""))
+    print("口径: 抓料按序上盘i / 放环(1,环号,盘格i) / 抓环倒序(3,r,r) / "
+          "暂区(1,i,i) / 码垛同色查账 | Ctrl+C 退出")
 
-    _STEP[0] = 0
-    # 抓料 ×3: 第 i 色从原料区位 i 抓到盘格 i (组2, Y=色序 Z=顺序格)
-    for i in range(1, len(colors) + 1):
-        run_action(lk, 2, i, i, args.timeout)
-    # 放环 ×3: 盘格 i 的料 → 环 任务码环号[i] (组1, Y=环号 Z=顺序格)
-    for i, ring_no in enumerate(rings, 1):
-        run_action(lk, 1, ring_no, i, args.timeout)
-    print("\n== 序列完成 ==")
+    seg("第一圈 (批1)")
+    grab_seg(lk, args, c1, "①")
+    drive_hint("物料区 → 粗加工区")
+    place_seg(lk, args, r1, "②")
+    grab_rings_seg(lk, args, r1, "③")
+    drive_hint("粗加工区 → 暂存区")
+    buffer_seg(lk, args, r1, "④")
+
+    if not two:
+        print("\n== 第一圈完成 (2 组简写码, 不跑批2) ==")
+        return
+
+    seg("第二圈 (批2)")
+    drive_hint("暂存区 → 返回原料区")
+    grab_seg(lk, args, task["batch2_colors"], "⑤")
+    drive_hint("物料区 → 粗加工区")
+    place_seg(lk, args, task["batch2_rings"], "⑥")
+    grab_rings_seg(lk, args, task["batch2_rings"], "⑦")
+    drive_hint("粗加工区 → 暂存区")
+    stack_seg(lk, args, task)
+    print("\n== 两圈全部完成 ==")
 
 
 if __name__ == "__main__":
