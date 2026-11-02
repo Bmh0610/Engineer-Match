@@ -46,10 +46,10 @@ def main():
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--start", type=int, choices=(1, 3), default=1,
                     help="出发点节点: 1=启停区1(默认), 3=启停区2")
-    ap.add_argument("--check", action="store_true",
-                    help="启用节点检测(需前相机; 默认纯跑图)")
+    ap.add_argument("--no-check", action="store_true",
+                    help="关闭节点检测(无前相机/纯跑图用; 默认开启——节点上相机判下一条边)")
     ap.add_argument("--cam", default=C.CAMERA_ID_FRONT,
-                    help="前视避障相机设备/别名(默认跟 config.CAMERA_ID_FRONT; 仅 --check 时打开)")
+                    help="前视避障相机设备/别名(默认跟 config.CAMERA_ID_FRONT; 仅检测开启时打开)")
     ap.add_argument("--model", default=C.MODEL_PATH_OBSTACLE,
                     help="避障检测引擎(默认 obstacle-best.engine; 笔记本调试用 obstacle-best.pt)")
     ap.add_argument("--auto", action="store_true", help="跳过逐段回车门控(联调后期用)")
@@ -61,7 +61,7 @@ def main():
     from task.nav_drive import WORK_APPROACH_MM, NavDriver
 
     watcher = None
-    if args.check:
+    if not args.no_check:
         from vision.camera import Camera
         from vision.detect import YOLOBackend
         from vision.obstacle import ObstacleWatcher
