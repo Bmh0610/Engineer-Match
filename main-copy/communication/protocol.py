@@ -48,6 +48,13 @@ class Mode:
     BUTTON_START_2 = 0x2202  # 一键启动·长按(T≥2s)→启停区2
 
 
+_SER_RUNTIME_MSG = (
+    "串口运行中断线: {err}\n"
+    "处置: ①整车断电等15s重上电(底盘电机大电流易拉掉 CH340 桥, 本型反复出现) "
+    "②拔插 Nano 侧 USB 线后 ls /dev/ttyUSB* 确认重新枚举 "
+    "③查占用: fuser /dev/ttyUSB* (上一进程未退会报 multiple access)")
+
+
 class LinkError(RuntimeError):
     pass
 
@@ -113,32 +120,43 @@ class Link:
 
     # ---- 下行 ----
 
+    def _write(self, data: bytes):
+        """发帧统一入口: 运行中断线转 RuntimeError(带处置指引, main 层优雅退出),
+        不让 SerialException 裸崩(会连带 TRT 线程 abort 核心转储)。"""
+        try:
+            self.ser.write(data)
+        except serial.SerialException as e:
+            raise RuntimeError(_SER_RUNTIME_MSG.format(err=e)) from None
+
     def move_v(self, dx: float, dy: float, dz: float = 0.0):
         """底盘(0x0001): 参数=预期原值(mm/°, 无×10! test_paotu 实车验证)。
         车体系相对位移: dx 右, dy 前, dz 旋转°(顺时针/右转为负;
         ⚠️ z 超出 ±180 会被固件 NormalizeAngle 归一化——z=-900 实测转 180°)。"""
-        self.ser.write(frame(Mode.MOVE_V, round(dx), round(dy), round(dz)))
+        self._write(frame(Mode.MOVE_V, round(dx), round(dy), round(dz)))
 
     def move_a(self, reach: float, height: float, theta: float = 0.0):
         """机械臂(0x0002): 参数=预期×10(0.1mm/0.1°, 电控样例与实测验证)。
         XYZ 为绝对目标: X 伸出距离(+x 与车同向), Y 离地高度(最高参数2090
         = 预期209mm), Z 回转角°(逆时针/朝车头+; 绝对语义, 回 0 即归位)。"""
-        self.ser.write(frame(Mode.MOVE_A, round(reach), round(height), round(theta)))
+        self._write(frame(Mode.MOVE_A, round(reach), round(height), round(theta)))
 
     def gripper(self, angle_01deg: int, time_ms: int):
         """夹爪: 角度(0.1° 分度, 如 1300=130.0°), 执行时间 ms。"""
-        self.ser.write(frame(Mode.GRIPPER, angle_01deg, time_ms))
+        self._write(frame(Mode.GRIPPER, angle_01deg, time_ms))
 
     def action(self, group: int, outer: int, car: int):
         """成套动作(0x0005): 下位机执行整套臂动作后回 ACK_ACTION(0x0015)。
         group: 1 车→地面 / 2 原料区→车 / 3 地面→车;
         outer: 地面或原料区位号(1~3); car: 车上转盘位号(1~3)。"""
-        self.ser.write(frame(Mode.ACTION, int(group), int(outer), int(car)))
+        self._write(frame(Mode.ACTION, int(group), int(outer), int(car)))
 
     # ---- 上行 ----
 
     def poll(self) -> list:
-        self._rx.extend(self.ser.read(256))
+        try:
+            self._rx.extend(self.ser.read(256))
+        except serial.SerialException as e:
+            raise RuntimeError(_SER_RUNTIME_MSG.format(err=e)) from None
         frames = []
         while True:
             f = decode(self._rx)
