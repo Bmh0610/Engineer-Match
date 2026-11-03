@@ -8,8 +8,8 @@
   rough 模式(粗加工区): (1, rings[i], 盘格i)——取盘格 i 的料放 rings[i] 号环;
   buffer 模式(暂存区第一圈): (1, i, i) 恒等正序——盘格 i(=环 i 的料)放暂存位 i,
   恰满足 G2 两区同位(零账本)。
-- 抓环(组3): 纯记忆不开视觉(放环后环上数字被物料挡), 倒序恒等——
-  对放过的环号从大到小 (3, r, r): 环 r → 盘格 r。
+- 抓环(组3): 纯记忆不开视觉(放环后环上数字被物料挡), 正序恒等(2026-11-03 定)——
+  放过的环号从小到大 (3, r, r): 环 r → 盘格 r。
 - 码垛(组1, 第二圈暂存区): 批2 同色叠批1 正上方。账本=批2 抓环后盘格 z 上的颜色
   是 G3[G4.index(z)]; 视觉版拍帧 find_materials 识别环上物料(画面左/中/右=位 1/2/3,
   朝向实车核对)定 Y、账本定 Z; --no-vision 推演版按 (1, stack_plan[色], G4[i])。
@@ -251,10 +251,11 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
 
 
 def grab_rings(lk, rings, timeout):
-    """抓环(组3) 纯记忆倒序恒等: 放过的环号从大到小 (3, r, r), 环 r → 盘格 r。
+    """抓环(组3) 纯记忆正序恒等(2026-11-03 用户定, 原倒序): 放过的环号从小到大
+    (3, r, r), 环 r → 盘格 r——恒等映射与次序无关, 统一取料侧 123 顺序。
     返回 (ok, total)。"""
-    print("\n===== 抓环 (纯记忆, 倒序恒等: 环r→盘格r) =====")
-    order = sorted(set(rings), reverse=True)
+    print("\n===== 抓环 (纯记忆, 正序恒等: 环r→盘格r) =====")
+    order = sorted(set(rings))
     ok = 0
     for r in order:
         if run_action(lk, 3, r, r, timeout):

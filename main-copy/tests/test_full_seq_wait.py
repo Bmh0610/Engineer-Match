@@ -6,7 +6,7 @@ finder.wait_any_color)即抓, 盘格=该色在任务码色序中的位次(色 c 
 如 213: 检出红→盘2、黄→盘1、蓝→盘3) → 发 MODE5 组2 → 等 0x0015(35s)。
 不再等特定色顺序, 命中不挑色; 识别失败的料不抓等下轮; 单窗超时剩余色跳过(保完赛)。
 
-其余(腿/扫码/放环 MODE5 组1 车上格z→地面y / 抓环 MODE5 组3 倒序恒等 环r→盘格r /
+其余(腿/扫码/放环 MODE5 组1 车上格z→地面y / 抓环 MODE5 组3 正序恒等 环r→盘格r /
 判环找中环/对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
 
 流程: 右移150→前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90→【守株抓料】
@@ -247,10 +247,10 @@ def action_place_rings(lk, cam, backend, task, timeout, mode="rough"):
 # ---- 动作组③: 抓环(环→盘, MODE5 组3: 地面→车) ----
 
 def action_grab_rings(lk, task, timeout):
-    """抓环×3轮(纯记忆不开视觉): 倒序恒等 MODE5 组3——环 r → 盘格 r,
-    按环号从大到小取(环3→盘3、环2→盘2、环1→盘1)。"""
-    print("\n===== 动作组③: 抓环 (MODE5 组3: 地面→车, 倒序恒等) =====")
-    for r in sorted(set(task["batch1_rings"]), reverse=True):
+    """抓环×3轮(纯记忆不开视觉): 正序恒等 MODE5 组3——环 r → 盘格 r,
+    按环号从小到大取(环1→盘1、环2→盘2、环3→盘3; 2026-11-03 用户定, 原倒序)。"""
+    print("\n===== 动作组③: 抓环 (MODE5 组3: 地面→车, 正序恒等) =====")
+    for r in sorted(set(task["batch1_rings"])):
         pos_name = {1: "左", 2: "中", 3: "右"}[r]
         print(f"\n----- 抓 {r} 号环({pos_name}位) → 车上格{r} -----")
         run_action(lk, 3, r, r, C.ACTION_TIMEOUT)   # 组3: 地面r号位→车上格r

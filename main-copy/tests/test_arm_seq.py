@@ -6,7 +6,7 @@
   ①抓料   组2 (2,2,i) i=1..3    视觉判序, Y=2 恒定取料工位(转盘送料进夹爪
                                 正下方, 只此一个抓取点), Z=第 i 个抓的上盘格 i
   ②粗区放环 组1 (1,G2[i],i)     盘格i → 环G2[i]
-  ③粗区抓环 组3 (3,r,r) r=3,2,1 倒序恒等: 环r→盘格r(纯记忆, 数字被物料挡)
+  ③粗区抓环 组3 (3,r,r) r=1,2,3 正序恒等: 环r→盘格r(纯记忆, 数字被物料挡)
   ④暂区放环 组1 (1,i,i) i=1..3  盘格i→暂存位i(恒等恰=G2 两区同位, 零账本)
   ⑤~⑦批2  同①~③(放环用 G4)
   ⑧码垛   组1: 开末端相机识别环上物料色(左/中/右=位1/2/3)定 Y, 盘上账本
@@ -63,9 +63,9 @@ def place_seg(lk, args, rings, batch="②"):
 
 
 def grab_rings_seg(lk, args, rings, batch="③"):
-    """粗区抓环段: 组3 倒序恒等 (3, r, r)。"""
-    order = sorted(set(rings), reverse=True)
-    seg(f"{batch} 粗区抓环(倒序恒等) 环{'→'.join(map(str, order))}")
+    """粗区抓环段: 组3 正序恒等 (3, r, r)(2026-11-03 定, 原倒序)。"""
+    order = sorted(set(rings))
+    seg(f"{batch} 粗区抓环(正序恒等) 环{'→'.join(map(str, order))}")
     for r in order:
         run(lk, 3, r, r, args.timeout)
 
