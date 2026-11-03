@@ -9,6 +9,7 @@
 (每色全场2个; 粗加工区只平放, 第一批放完即搬走)。
 格式非法一律返回 None(gcxl 同策略, 调用方兜底)。
 """
+import os
 import re
 import time
 
@@ -55,6 +56,16 @@ def parse_test_code(raw):
             "stack_plan": dict(zip(colors, rings))}
 
 
+def draw_dets(frame, dets, ok_data=None):
+    """检测框+解码内容叠加(调试预览用: 合法任务码绿框, 非法码黄框)。"""
+    for data, (x, y, w, h) in dets:
+        color = (0, 255, 0) if data == ok_data else (0, 255, 255)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+        cv2.putText(frame, data[:40], (x, max(y - 8, 16)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    return frame
+
+
 class QrScanner:
     """cv2 二维码检测(核心移植自 gcxl detect.py:692-800)。"""
 
@@ -93,19 +104,43 @@ class QrScanner:
                 return dets
         return []
 
-    def scan_from_camera(self, cam, timeout=5.0, poll=0.05):
+    def scan_from_camera(self, cam, timeout=5.0, poll=0.05, preview=False):
         """循环取帧扫码, 首个合法任务码 → parse_task 结果; 超时返回 None。
 
         cam: Camera(read_latest 接口); 不开窗口(比赛无显示依赖)。
+        preview=True 开调试窗口: 实时画面+检测框(黄=检出/绿=合法任务码),
+        无 DISPLAY 自动降级纯终端; 按 q 可提前放弃扫码(返回 None)。
         """
+        show = preview and bool(os.environ.get("DISPLAY"))
+        if preview and not show:
+            print("  !! 无 DISPLAY, 扫码预览不可用(走纯终端日志)")
         deadline = time.time() + timeout
-        while time.time() < deadline:
-            frame = cam.read_latest(timeout=0.2)
-            if frame is None:
-                continue
-            for data, _box in self.detect(frame):
-                parsed = parse_task(data)
-                if parsed:
-                    return parsed
-            time.sleep(poll)
-        return None
+        invalid_seen = set()
+        try:
+            while time.time() < deadline:
+                frame = cam.read_latest(timeout=0.2)
+                if frame is None:
+                    continue
+                dets = self.detect(frame)
+                if show and not dets:
+                    cv2.imshow("qr_scan", frame)
+                for data, _box in dets:
+                    parsed = parse_task(data)
+                    if parsed:
+                        if show:
+                            cv2.imshow("qr_scan", draw_dets(frame, dets, data))
+                            cv2.waitKey(800)   # 停一拍让你看到绿框
+                        return parsed
+                    if data not in invalid_seen:
+                        invalid_seen.add(data)
+                        print(f"  !! 检出二维码但格式非法: {data!r} —— 继续等合法码")
+                if show and dets:
+                    cv2.imshow("qr_scan", draw_dets(frame, dets, None))
+                if show and cv2.waitKey(1) & 0xFF == ord("q"):
+                    print("  (q: 放弃扫码)")
+                    return None
+                time.sleep(poll)
+            return None
+        finally:
+            if show:
+                cv2.destroyAllWindows()
