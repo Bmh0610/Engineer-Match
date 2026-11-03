@@ -48,6 +48,8 @@ def find_rings(frame, digit=None):
     out = []
     for item in _cv_find(frame, keep_unknown=bool(digit is None)):
         digit_s, cx, cy, _outer, box, conf_v = item
+        if digit_s is None:
+            continue
         d = int(digit_s)
         if digit is not None and d != digit:
             continue

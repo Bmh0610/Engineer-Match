@@ -142,12 +142,14 @@ def find_material_fn(backend):
 
 
 def find_ring_mid_fn():
-    """中环检测闭包: 离画面中心最近的数字环(建锚用; 仅环空数字可见时可靠)。"""
+    """中环检测闭包: 只返回 digit==2 的环(建锚用; 仅环空数字可见时可靠)。
+    未检出 2 号环 → None(调用方放弃纠偏, 保完赛)。"""
     from task.ring import find_rings
 
     def find(f):
         rings = find_rings(f)
-        return min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2) if rings else None
+        mid = [r for r in rings if r.digit == 2]
+        return min(mid, key=lambda r: r.dx ** 2 + r.dy ** 2) if mid else None
     return find
 
 
