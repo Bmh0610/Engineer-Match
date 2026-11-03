@@ -134,12 +134,27 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
 
 
 def find_material_fn(backend):
-    """物料检测闭包: 离画面中心最近的一颗(定一/码垛纠偏用)。"""
+    """物料检测闭包: 离画面中心最近的一颗(定一用)。"""
     from vision import finder
 
     def find(f):
         mats = finder.find_materials(backend, f, conf=0.5, px_per_mm=C.PX_PER_MM)
         return finder.nearest_to_axis(mats, f.shape)
+    return find
+
+
+def find_stack_material_fn(backend):
+    """码垛纠偏闭包: 只取**中环带**内物料(锚点=中环上那颗, 与圆环纠偏锁 digit==2
+    同思路——2026-11-04 用户定)。带=|dx| ≤ RING_PITCH_PX/2≈130px(画面中心±130px,
+    环距 150mm×环比例尺已知); 左右位物料结构性排除。带内无物料 → None → 放弃纠偏。"""
+    from vision import finder
+    half = C.RING_PITCH_PX / 2   # ≈130px
+
+    def find(f):
+        mats = finder.find_materials(backend, f, conf=0.5,
+                                     px_per_mm=C.PX_PER_MM)
+        mid = [m for m in mats if abs(m.dx) <= half]
+        return min(mid, key=lambda m: m.dx ** 2 + m.dy ** 2) if mid else None
     return find
 
 
@@ -301,8 +316,8 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
         if C.IMG2BODY_STACK is None:
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
                   "(同场景几何最接近; 标定: test_img2body_cal.py --stack 后填 config)")
-        align(lk, cam, find_material_fn(backend), matrix,
-              "码垛纠偏(对物料建锚)", timeout, auto=True,)
+        align(lk, cam, find_stack_material_fn(backend), matrix,
+              "码垛纠偏(对中环物料建锚)", timeout, auto=True)
         from vision import finder
         f = cam.read_latest(timeout=1.0)
         mats = [] if f is None else finder.find_materials(

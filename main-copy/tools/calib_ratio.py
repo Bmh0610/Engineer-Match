@@ -43,7 +43,8 @@ def on_mouse(event, x, y, flags, st):
 
 def main():
     ap = argparse.ArgumentParser(description="像素比例尺实测(px/mm, 手动两点测距)")
-    ap.add_argument("--cam", type=int, default=0)
+    ap.add_argument("--cam", default=0,
+                    help="相机设备: udev 别名(/dev/cam_end)或编号; 默认 0")
     ap.add_argument("--ring", action="store_true",
                     help="环面标定模式: 打印 PX_PER_MM_RING(在环观测位姿下跑)")
     ap.add_argument("--stack", action="store_true",
