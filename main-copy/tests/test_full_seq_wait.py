@@ -9,10 +9,14 @@ finder.wait_any_color)即抓, 盘格=该色在任务码色序中的位次(色 c 
 其余(腿/扫码/放环 MODE5 组1 车上格z→地面y / 抓环 MODE5 组3 正序恒等 环r→盘格r /
 判环找中环/对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
 
-流程: 右移150→前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90→【守株抓料】
-→逆转90→前进920→前进850→逆转90→【放环】【抓环】(粗加工区)→后退820→顺转90
-→后退800(暂存区)→【放环】【抓环】→后退850→顺转90→后退850→后退800→逆转90
-→左移50→后退50→完成(回启停区)。
+两圈比赛流程(2026-11-04 定, 对齐 main.py 产线语义; 行车=固定腿距非 NavDriver):
+  第一圈: 右移150→前进1000→扫码→顺转90→前进850→顺转90→前进875→逆转90
+          →【守株抓料批1】→逆转90→前进920→前进850→逆转90→【放环G2】【抓环】
+          →后退820→顺转90→后退800(暂存区)→【放环·恒等】(物料留位, 不抓环!)
+  回料:   后退850→顺转90→后退820→顺转90→前进120→逆转90(摆回批1抓料位, 820/120 待实车校准)
+  第二圈: 【守株抓料批2】→逆转90→前进920→前进850→逆转90→【放环G4】【抓环】
+          →后退820→顺转90→后退800(暂存区)→【码垛·组4 叠批1上】
+  回程:   后退850→顺转90→后退850→后退800→逆转90→左移50→后退50→完成(回启停区)。
 
 用法: python3 tests/test_full_seq_wait.py [--skip-to start|rough|buffer|home]
       [--wait 60]
@@ -232,7 +236,7 @@ def run_action(lk, group, outer, car, timeout, gap=0):
              Mode.ACK_ACTION, timeout=timeout, gap=gap)
 
 
-def action_grab_materials(lk, cam, backend, task, wait):
+def action_grab_materials(lk, cam, backend, task, wait, colors=None):
     """抓料×3轮(守株待兔·对号入座): 定一(复位位, 建锚)后车一动不动——
     **任意色**进窗+停歇稳定即抓(不等特定色), 盘格=该色在任务码色序中的位次
     → MODE5 组2 (2, 2, k)。识别失败的料不抓等下轮, 单窗超时剩余色跳过(保完赛)。"""
@@ -240,7 +244,7 @@ def action_grab_materials(lk, cam, backend, task, wait):
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
     _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
            "定一纠偏(建锚)", wait)
-    order = list(task["batch1_colors"])
+    order = list(colors or task["batch1_colors"])
     grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
     skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)
     while len(grabbed) < len(order):
@@ -267,7 +271,7 @@ def action_grab_materials(lk, cam, backend, task, wait):
 
 # ---- 动作组②: 放环(盘→环, MODE5 组1: 车→地面) ----
 
-def action_place_rings(lk, cam, task, timeout, mode="rough"):
+def action_place_rings(lk, cam, task, timeout, mode="rough", rings=None, colors=None):
     """放环×3轮: 判环找中环+对中环纠偏建锚(唯一底盘动作) → MODE5 组1(车→地面)。
     rough(粗加工区): (1, rings[i], 盘格i) 按任务码环号序; buffer(暂存区, 第一圈):
     (1, i, i) 恒等正序——抓环恒等后盘格i=环i的料, 恰满足 G2 两区同位(零账本)。"""
@@ -278,12 +282,12 @@ def action_place_rings(lk, cam, task, timeout, mode="rough"):
     _seek_mid_ring(lk, cam, timeout)   # 判环: 非2号沿y±80找中环
     _align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout)
-    rings = task["batch1_rings"]
+    rings = rings or task["batch1_rings"]
+    colors = colors or task["batch1_colors"]
     if mode == "rough":
-        seq = [(ring_no, i, task["batch1_colors"][i - 1])
-               for i, ring_no in enumerate(rings, 1)]
+        seq = [(ring_no, i, colors[i - 1]) for i, ring_no in enumerate(rings, 1)]
     else:
-        seq = [(i, i, task["batch1_colors"][i - 1]) for i in range(1, len(rings) + 1)]
+        seq = [(i, i, colors[i - 1]) for i in range(1, len(rings) + 1)]
     for y, z, color in seq:
         pos_name = {1: "左", 2: "中", 3: "右"}[y]
         print(f"\n----- 放 {color} → 环{y}({pos_name}位), 取盘格{z} -----")
@@ -293,15 +297,26 @@ def action_place_rings(lk, cam, task, timeout, mode="rough"):
 
 # ---- 动作组③: 抓环(环→盘, MODE5 组3: 地面→车) ----
 
-def action_grab_rings(lk, task, timeout):
+def action_grab_rings(lk, task, timeout, rings=None):
     """抓环×3轮(纯记忆不开视觉): 正序恒等 MODE5 组3——环 r → 盘格 r,
     按环号从小到大取(环1→盘1、环2→盘2、环3→盘3; 2026-11-03 用户定, 原倒序)。"""
     print("\n===== 动作组③: 抓环 (MODE5 组3: 地面→车, 正序恒等) =====")
-    for r in sorted(set(task["batch1_rings"])):
+    for r in sorted(set(rings or task["batch1_rings"])):
         pos_name = {1: "左", 2: "中", 3: "右"}[r]
         print(f"\n----- 抓 {r} 号环({pos_name}位) → 车上格{r} -----")
         run_action(lk, 3, r, r, C.ACTION_TIMEOUT)   # 组3: 地面r号位→车上格r
     print("\n== 抓环完成 (车在中环锚点位, 纯记忆) ==")
+
+
+# ---- 动作组④: 码垛(批2 暂存区, 组4 叠批1 上; 复用 mission 库) ----
+
+def action_stack_rings(lk, cam, backend, task, timeout):
+    """码垛: 批2 同色叠批1 正上方(MODE5 组4, 视觉识别环上物料定 Y+账本定 Z)。
+    组4 内部放置高度 1000 自理; 前提=地面该位已有批1 物料(批1 暂存放环保证)。"""
+    import task.mission as M
+    print("\n===== 动作组④: 码垛 (MODE5 组4: 车→地面第二层) =====")
+    ok, tot = M.stack_rings(lk, cam, backend, task, timeout, use_vision=True)
+    print(f"\n== 码垛完成 ({ok}/{tot}) ==")
 
 
 # ---- 扫码 ----
@@ -328,10 +343,10 @@ def main():
     ap = argparse.ArgumentParser(description="整场流程联调·守株待兔抓取版")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
-    ap.add_argument("--skip-to", choices=("start", "rough", "buffer", "home"),
+    ap.add_argument("--skip-to", choices=("start", "rough", "buffer", "grab2", "home"),
                     default="start",
-                    help="start=全流程(默认); rough/buffer=从该区动作组起跑"
-                         "(车人工摆位); home=只跑回程腿")
+                    help="start=两圈全程(默认); rough/buffer/grab2=从该段起跑"
+                         "(车人工摆位, 从该段跑到底); home=只跑回程腿")
     ap.add_argument("--timeout", type=float, default=5.0,
                     help="纠偏单轮等稳定帧超时(秒)")
     ap.add_argument("--wait", type=float, default=60.0,
@@ -385,7 +400,8 @@ def main():
         leg_move(lk, 0, 0, 90, "逆时针转90(机械臂朝物料盘)")
         if display:
             display.set_step("守株抓料(批1)")
-        action_grab_materials(lk, cam, backend, task, args.wait)
+        action_grab_materials(lk, cam, backend, task, args.wait,
+                              colors=task["batch1_colors"])
         leg_move(lk, 0, 0, 90, "逆时针转90")
         leg_move(lk, 0, 920, 0, "前进920")
         leg_move(lk, 0, 850, 0, "前进850")
@@ -394,8 +410,8 @@ def main():
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
         if display:
-            display.set_step("粗加工区→放环")
-        action_place_rings(lk, cam, task, args.timeout)
+            display.set_step("粗加工区→放环(批1)")
+        action_place_rings(lk, cam, task, args.timeout)                    # G2
         action_grab_rings(lk, task, args.timeout)
         leg_move(lk, 0, -820, 0, "后退820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
@@ -404,10 +420,45 @@ def main():
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
         if display:
-            display.set_step("暂存区→放环")
-        action_place_rings(lk, cam, task, args.timeout)
-        action_grab_rings(lk, task, args.timeout)
-    if args.skip_to in ("start", "rough", "buffer", "home"):
+            display.set_step("暂存区→放环(批1, 物料留位等码垛)")
+        action_place_rings(lk, cam, task, args.timeout, mode="buffer")    # 恒等, 只放环
+        # 批1 暂存区不抓环——物料留在暂存位, 批2 码垛叠其上(比赛规则)
+
+    # ---- 回物料盘(批2): 摆回批1抓料结束位(位置+朝向), 腿距待实车校准 ----
+    if args.skip_to in ("start", "rough", "buffer", "grab2"):
+        if task is None:
+            task = parse_task(C.DEFAULT_TASK_CODE)
+        if args.skip_to == "grab2":
+            print("== [grab2] 人工摆物料盘(批1抓料位, 车头朝东), 直接跑批2 ==")
+        else:
+            if display:
+                display.set_step("回物料盘(取批2)")
+            leg_move(lk, 0, -850, 0, "后退850(南行至南车道)")
+            leg_move(lk, 0, 0, -90, "顺时针转90(朝东)")
+            leg_move(lk, 0, -820, 0, "后退820(西行至物料盘经线)")
+            leg_move(lk, 0, 0, -90, "顺时针转90(朝南)")
+            leg_move(lk, 0, 120, 0, "前进120(对齐抓料位)")
+            leg_move(lk, 0, 0, 90, "逆时针转90(朝东=批1抓料朝向)")
+        if display:
+            display.set_step("守株抓料(批2)")
+        action_grab_materials(lk, cam, backend, task, args.wait,
+                              colors=task["batch2_colors"])
+        leg_move(lk, 0, 0, 90, "逆时针转90")
+        leg_move(lk, 0, 920, 0, "前进920")
+        leg_move(lk, 0, 850, 0, "前进850")
+        leg_move(lk, 0, 0, 90, "逆时针转90")
+        if display:
+            display.set_step("粗加工区→放环(批2)")
+        action_place_rings(lk, cam, task, args.timeout,
+                           rings=task["batch2_rings"], colors=task["batch2_colors"])
+        action_grab_rings(lk, task, args.timeout, rings=task["batch2_rings"])
+        leg_move(lk, 0, -820, 0, "后退820")
+        leg_move(lk, 0, 0, -90, "顺时针转90")
+        leg_move(lk, 0, -800, 0, "后退800(到暂存区)")
+        if display:
+            display.set_step("暂存区→码垛(批2)")
+        action_stack_rings(lk, cam, backend, task, args.timeout)
+    if args.skip_to in ("start", "rough", "buffer", "grab2", "home"):
         leg_move(lk, 0, -850, 0, "后退850")
         leg_move(lk, 0, 0, -90, "顺时针转90")
         leg_move(lk, 0, -850, 0, "后退850")
