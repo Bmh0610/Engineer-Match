@@ -284,8 +284,12 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
     colors2 = task["batch2_colors"]
     jobs = []                        # (位Y, 盘格Z, 颜色)
     if use_vision:
-        arm_move(lk, C.RESET, "抬臂至标定高度(码垛纠偏前, Y=2090 与三纠偏臂高一定口径一致)")
-        align(lk, cam, find_material_fn(backend), C.IMG2BODY,
+        arm_move(lk, C.RESET, "抬臂至标定高度(码垛纠偏前, RESET Y=1810=标定高度, 2026-11-03 用户改)")
+        matrix = C.IMG2BODY_STACK if C.IMG2BODY_STACK is not None else C.IMG2BODY_RING
+        if C.IMG2BODY_STACK is None:
+            print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
+                  "(同场景几何最接近; 标定: test_img2body_cal.py --stack 后填 config)")
+        align(lk, cam, find_material_fn(backend), matrix,
               "码垛纠偏(对物料建锚)", timeout, auto=True)
         from vision import finder
         f = cam.read_latest(timeout=1.0)
