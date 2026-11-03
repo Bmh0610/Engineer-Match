@@ -281,18 +281,21 @@ def find_ring_mid_fn(backend=None):
 
 
 def seek_mid_ring(lk, cam, backend, timeout):
-    """纠偏前判环找中环: 对准 1 号环 y-RING_SEEK_STEP、3 号 y+RING_SEEK_STEP,
-    直到对准 2 号环再纠偏; 未见环直接纠偏兜底。仅放环开场(环空数字可见)用;
+    """纠偏前判环找中环(2026-11-05 用户定三规则):
+    ① 看到 1 号环 → y+80；看到 3 号环 → y−80(2026-11-05 方向更正, 原反);
+    ② 一个环都没看到 → x+10 步进扫描(直到看到环);
+    ③ 对准 2 号环 → 直接纠偏。仅放环开场(环空数字可见)用;
     码垛段数字被批1物料挡, 不做判环(直接对物料纠偏)。"""
     from task.ring import find_rings
     deadline = time.time() + timeout
     moved = 0
-    n_none = 0
+    scanned = 0
     t_line = time.time()
     while time.time() < deadline and moved < 3:
         f = cam.read_latest(timeout=0.2)
         if f is None:
-            n_none += 1
+            n_none = getattr(seek_mid_ring, "_n_none", 0) + 1
+            seek_mid_ring._n_none = n_none
             if time.time() - t_line >= 1.0:
                 print(f"  [判环] 无帧(read_latest None×{n_none})——相机/链路问题?")
                 t_line = time.time()
@@ -305,13 +308,18 @@ def seek_mid_ring(lk, cam, backend, timeout):
             print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'}")
             t_line = now
         if not rings:
-            time.sleep(0.2)
+            # ② 无环: x+10 步进扫描(2026-11-05 用户定, 原地等待改为横移找环)
+            _send_move_v(lk, C.RING_SEEK_STEP_X, 0)
+            scanned += 1
+            print(f"  · 无环, x+{C.RING_SEEK_STEP_X:.0f} 扫描(第{scanned}步)")
+            time.sleep(0.3)
             continue
         hit = min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2)
         if hit.digit == 2:
             print("  ✓ 已对准 2 号环(中环), 直接纠偏")
             return
-        dy = -C.RING_SEEK_STEP if hit.digit == 1 else C.RING_SEEK_STEP
+        # ① 方向(2026-11-05 用户更正): 看到 1 号 → y+80; 看到 3 号 → y−80
+        dy = C.RING_SEEK_STEP if hit.digit == 1 else -C.RING_SEEK_STEP
         print(f"  · 当前对准 {hit.digit} 号环, 沿 y{dy:+.0f} 找 2 号环")
         _send_move_v(lk, dy, 0)
         moved += 1
@@ -388,20 +396,24 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
     for y, z in seq:
         if run_action(lk, 1, y, z, timeout):
             ok += 1
+    _send_move_v(lk, 0, -30)   # 2026-11-05 用户定: 圆环放完 y−30 回节点位
+    print("  · 放环后 y-30 回节点位")
     print(f"== 放环完成 ({ok}/{len(seq)}, 车在中环锚点位) ==")
     return ok, len(seq)
 
 
 def grab_rings(lk, rings, timeout):
     """抓环(组3) 纯记忆正序恒等(2026-11-03 用户定, 原倒序): 放过的环号从小到大
-    (3, r, r), 环 r → 盘格 r——恒等映射与次序无关, 统一取料侧 123 顺序。
-    返回 (ok, total)。"""
+    环 r → 盘格 r——恒等映射与次序无关, 统一取料侧 123 顺序。
+    抓完 y−30 回节点位(2026-11-05 用户定: 圆环抓完同放环)。返回 (ok, total)。"""
     print("\n===== 抓环 (纯记忆, 正序恒等: 环r→盘格r) =====")
     order = sorted(set(rings))
     ok = 0
     for r in order:
         if run_action(lk, 3, r, r, timeout):
             ok += 1
+    _send_move_v(lk, 0, -30)   # 2026-11-05 用户定: 圆环抓完 y−30 回节点位
+    print("  · 抓环后 y-30 回节点位")
     print(f"== 抓环完成 ({ok}/{len(order)}, 盘格=环号恒等) ==")
     return ok, len(order)
 
