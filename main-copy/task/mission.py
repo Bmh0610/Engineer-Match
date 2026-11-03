@@ -182,23 +182,44 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
             _dump_miss_frame(f1, "/tmp/mat_miss.jpg", "物料定一")
             time.sleep(0.3)
             continue
-        # 停歇判定: 帧1每颗到帧2最近颗距离全部 ≤ 阈值(不跟踪单颗, 防最底下转圈跳变)
+        # 停歇判定: 双向最近邻全 ≤ 阈值(2026-11-05 修: 单向会被物料交错换位欺骗——
+        # f1 的 A 在 f2 里近邻是 B 时位移虚小, 实际转盘在动)
         tol = C.STABLE_TOL_PX * 2
-        pairs = [min(math.hypot(a.cx - b.cx, a.cy - b.cy) for b in m2) for a in m1]
-        if max(pairs) > tol:
-            print(f"  [纠偏] 转盘转动中, 暂停纠偏(不发帧, 最大位移 {max(pairs):.0f}px)")
+        pairs_f12 = [min(math.hypot(a.cx - b.cx, a.cy - b.cy) for b in m2) for a in m1]
+        pairs_f21 = [min(math.hypot(b.cx - a.cx, b.cy - a.cy) for a in m1) for b in m2]
+        if max(pairs_f12 + pairs_f21) > tol:
+            print(f"  [纠偏] 转盘转动中, 暂停纠偏(不发帧, 最大位移 "
+                  f"{max(pairs_f12 + pairs_f21):.0f}px)")
             time.sleep(0.3)
             continue
-        # 停歇: 目标=框内离画面中心最近, 无则画面最底下(cy 最大)
-        h, w = f1.shape[:2]
-        in_box = [m for m in m1
+        # 停歇: 目标=框内离画面中心最近, 无则画面最底下(cy 最大)——用 f2(最新帧,
+        # 2026-11-05 修: 原用 f1 是 0.2s+ 前旧帧, 暂停期间转盘累积位移在放行瞬间
+        # 一次性污染测量, 实车第2轮残差 137mm 即此)
+        h, w = f2.shape[:2]
+        in_box = [m for m in m2
                   if x0 * w <= m.cx <= x1 * w and y0 * h <= m.cy <= y1 * h]
         if in_box:
             tgt = min(in_box, key=lambda m: m.dx ** 2 + m.dy ** 2)
             src_tag = "框内"
         else:
-            tgt = max(m1, key=lambda m: m.cy)
+            tgt = max(m2, key=lambda m: m.cy)
             src_tag = "最底下"
+        # 放行前再确认一次(2026-11-05 修): f3 与 f2 比对, 堵"判定通过瞬间转盘启动"
+        # 的最后窗口; 不过关则不发帧, 重新判停
+        time.sleep(0.2)
+        f3 = cam.read_latest(timeout=0.2)
+        m3 = [] if f3 is None else finder.find_materials(
+            backend, f3, conf=0.5, px_per_mm=C.PX_PER_MM)
+        if not m3:
+            continue
+        pairs_23 = [min(math.hypot(b.cx - cc.cx, b.cy - cc.cy) for cc in m3)
+                    for b in m2]
+        pairs_32 = [min(math.hypot(cc.cx - b.cx, cc.cy - b.cy) for b in m2)
+                    for cc in m3]
+        if max(pairs_23 + pairs_32) > tol:
+            print(f"  [纠偏] 放行前复检: 转盘又动了(最大位移 "
+                  f"{max(pairs_23 + pairs_32):.0f}px), 不发帧重判")
+            continue
         round_no += 1
         a, b, c, d = C.IMG2BODY
         dy_right = a * tgt.dx + b * tgt.dy
