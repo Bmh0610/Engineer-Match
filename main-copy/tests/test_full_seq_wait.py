@@ -274,7 +274,7 @@ def action_place_rings(lk, cam, task, timeout, mode="rough"):
     print(f"\n===== 动作组②: 放环 (MODE5 组1: 车→地面, "
           f"{'任务码环号序' if mode == 'rough' else '恒等'}) =====")
     arm(lk, "回复位", C.RESET)
-    arm(lk, "圆环避障位(前伸32mm)", C.RING_AVOID)
+    arm(lk, "圆环纠偏位(前伸32mm)", C.RING_ALIGN)
     _seek_mid_ring(lk, cam, timeout)   # 判环: 非2号沿y±80找中环
     _align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout)

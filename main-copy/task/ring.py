@@ -7,7 +7,7 @@
 分开: 环纠偏只用 *_RING, 未填即拒跑(无回退, 防两套标定互相污染)。
 
 流程(车到粗加工区, 臂在复位位 OBSERVE=(0,2090,0)):
-  摆圆环避障位 RING_AVOID → 找数字环 → 取画面 cx 居中者(物理中间环)
+  摆圆环纠偏位 RING_ALIGN → 找数字环 → 取画面 cx 居中者(物理中间环)
   做"定一"目标 → 整车看-动-再看纠偏(骨架同 grab.align: 死区3mm ≤5轮, 超时
   带误差继续) → 收敛帧数字→左中右位置映射(未检出数字按默认次序 1,2,3 填空位
   +告警) → 任务码颜色序: 盘上取料 → 对应位置示教位姿 RING_SLOT_L/M/R 放置
@@ -210,7 +210,7 @@ class StepRing:
         if not order:
             print("  !! 盘上无料可放, 放3环节跳过")
             return []
-        self.move_arm(*C.RING_AVOID, label="到环观测位(=圆环避障位)")
+        self.move_arm(*C.RING_ALIGN, label="到圆环纠偏位")
         dmap = self.align_mid()
         if dmap is None:
             print("  !! 环区未见数字环(未到位/识别失败), 放置跳过 —— 料保留在盘上")

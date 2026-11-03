@@ -242,7 +242,7 @@ def place_rings(lk, cam, rings, timeout, mode="rough", colors=None):
     from vision import finder
     print(f"\n===== 放环 ({'粗加工区' if mode == 'rough' else '暂存区'}) =====")
     arm_move(lk, C.RESET, "回复位")
-    arm_move(lk, C.RING_AVOID, "圆环避障位(前伸32mm)")
+    arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
     seek_mid_ring(lk, cam, timeout)
     align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
           "对中环纠偏(建锚)", timeout, auto=True)
@@ -293,7 +293,7 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
     jobs = []                        # (位Y, 盘格Z, 颜色)
     if use_vision:
         arm_move(lk, C.RESET, "抬臂至标定高度(码垛纠偏前, RESET Y=1810=标定高度, 2026-11-03 用户改)")
-        arm_move(lk, C.RING_AVOID, "圆环避障位(前伸32mm)")
+        arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
         matrix = C.IMG2BODY_STACK if C.IMG2BODY_STACK is not None else C.IMG2BODY_RING
         if C.IMG2BODY_STACK is None:
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
