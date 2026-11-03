@@ -347,6 +347,11 @@ def main():
     scan_cam = Camera(C.CAMERA_ID_SCAN, "scan")   # 扫码专用相机(/dev/cam_scan)
     scan_cam.open()
     _web_start()
+    try:
+        import webbrowser
+        webbrowser.open(f"http://localhost:{5000}")
+    except Exception:
+        print(f"  状态页面: http://localhost:5000 (浏览器手动打开)")
     cam = Camera(C.CAMERA_ID_END, "end")          # 末端相机: 守株等色/纠偏/判环
     cam.open()
     print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
