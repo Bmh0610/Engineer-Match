@@ -83,7 +83,8 @@ class NavDriver:
         """一条 move_v 等 ACK_CHASSIS 完成码; 静默超时抛错不重发(单命令在途)。"""
         self.lk.send_and_wait(lambda: self.lk.move_v(x, y, z),
                               Mode.ACK_CHASSIS, C.CMD_TIMEOUT, label)
-        time.sleep(2)                   # 动作间 2s(等车稳, 与 drive() 同节奏)
+        time.sleep(1.5)                 # 腿间 1.5s(2026-11-05 用户定 2→1.5, 与
+                                        # test_full_seq_wait 的固定腿 gap 一致)
 
     def launch(self, jog=None):
         """发车对位腿(摆车位→车道中心节点, 车体系 右移,前进 mm)。对位不入图,
