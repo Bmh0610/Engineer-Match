@@ -4,7 +4,7 @@
 用法: python3 tests/test_ring_align.py [--code 任务码]
 
 流程(每轮):
-  回车 → 等稳定帧(转盘/车静止) → YOLO 找数字环 → 取画面中间者(定一目标)
+  回车 → 等稳定帧(转盘/车静止) → 找数字环(OpenCV ring_cv) → 取画面中间者(定一目标)
   → 算车体系偏差(前/右 mm, IMG2BODY_RING) → 打印 12 字节纠偏帧 + 一行流发送命令
   → 你自己发帧(脚本不自动动车) → 车停后回车测下一轮; 残差 ≤3mm 提示已收敛。
 每轮同时打印"数字→左中右"识别映射(纠偏顺便核对 1/2/3 检出位置)。
@@ -45,6 +45,7 @@ def main():
 
     print(f"回车=测一轮(偏差+纠偏帧); q 退出; 收敛=残差≤{C.ALIGN_TOL_MM:.0f}mm")
     rnd = 0
+    applied_offset = False   # 基准补偿只随第一帧纠偏走一次(2026-11-03)
     while True:
         try:
             if input(f"\n[第{rnd + 1}轮] 回车测偏差 / q 退出: ").strip().lower() == "q":
@@ -56,7 +57,13 @@ def main():
             print("  !! 未检出数字环(核对臂在环观测位/环区在画面内), 车不动, 回车重测")
             continue
         dy_right, dx_fwd = sp._to_body(obj)
-        residual = math.hypot(dx_fwd, dy_right)
+        if not applied_offset:
+            off_r, off_f = C.RING_ALIGN_OFFSET
+            dy_right += off_r
+            dx_fwd += off_f
+            applied_offset = True
+            print(f"  含基准补偿: 右{off_r:+.1f} 前{off_f:+.1f}mm")
+        residual = math.hypot(dy_right, dx_fwd)
         rnd += 1
         print(f"  数字→位置: {sp._digit_map(fr)}")
         if residual <= C.ALIGN_TOL_MM:

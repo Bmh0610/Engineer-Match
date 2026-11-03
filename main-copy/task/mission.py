@@ -90,9 +90,11 @@ def _send_move_v(lk, dy_right, dx_fwd):
     return False
 
 
-def align(lk, cam, find_fn, matrix, label, timeout, auto=True):
+def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
+          offset=(0.0, 0.0)):
     """整车纠偏: 看-动-再看, 死区 ≤ALIGN_TOL_MM ≤ALIGN_MAX_ITER 轮, 超时带误差继续(保完赛)。
-    auto=True 不弹门控直接跑(建锚用); False 回车触发/s 跳过(人工兜底)。"""
+    auto=True 不弹门控直接跑(建锚用); False 回车触发/s 跳过(人工兜底)。
+    offset=(右,前) mm: 纠偏结束后补走的固定基准补偿(相机基准点漂移, 2026-11-03)。"""
     if not auto:
         try:
             ans = input(f"\n<- 回车={label}(看-动-再看) / s=跳过: ").strip().lower()
@@ -103,6 +105,7 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True):
             return
     from vision import finder
     deadline = time.time() + C.ALIGN_TIMEOUT
+    done = False
     for i in range(1, C.ALIGN_MAX_ITER + 1):
         obj, _fr = finder.find_stable(find_fn, cam,
                                       timeout=max(0.5, deadline - time.time()))
@@ -115,13 +118,17 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True):
         residual = math.hypot(dx_fwd, dy_right)
         if residual <= C.ALIGN_TOL_MM:
             print(f"  ✓ 纠偏结束 (残差 {residual:.1f}mm, {i} 轮)")
-            return
+            done = True
+            break
         if time.time() > deadline:
             break
         print(f"  [纠偏] 第{i}轮: 前{dx_fwd:+.1f} 右{dy_right:+.1f} (残差 {residual:.1f}mm)")
         _send_move_v(lk, dy_right, dx_fwd)
         time.sleep(C.ALIGN_SETTLE)
     print("  纠偏结束(带误差, 保完赛继续)")
+    if offset[0] or offset[1]:
+        _send_move_v(lk, offset[0], offset[1])
+        print(f"  [纠偏] 基准补偿: 右{offset[0]:+.1f} 前{offset[1]:+.1f}mm")
 
 
 def find_material_fn(backend):
@@ -235,7 +242,7 @@ def place_rings(lk, cam, rings, timeout, mode="rough", colors=None):
     arm_move(lk, C.RESET, "回复位")
     seek_mid_ring(lk, cam, timeout)
     align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
-          "对中环纠偏(建锚)", timeout, auto=True)
+          "对中环纠偏(建锚)", timeout, auto=True, offset=C.RING_ALIGN_OFFSET)
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]
     else:
@@ -288,7 +295,8 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
                   "(同场景几何最接近; 标定: test_img2body_cal.py --stack 后填 config)")
         align(lk, cam, find_material_fn(backend), matrix,
-              "码垛纠偏(对物料建锚)", timeout, auto=True)
+              "码垛纠偏(对物料建锚)", timeout, auto=True,
+              offset=C.RING_ALIGN_OFFSET)
         from vision import finder
         f = cam.read_latest(timeout=1.0)
         mats = [] if f is None else finder.find_materials(
