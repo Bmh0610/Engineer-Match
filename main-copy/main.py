@@ -30,6 +30,7 @@ import task.mission as M  # noqa: E402
 from communication.protocol import Mode  # noqa: E402
 from vision.qr import parse_task  # noqa: E402
 from display import create_display  # noqa: E402
+from task.nav_drive import WORK_APPROACH_MM  # noqa: E402
 
 
 # ---- 出发点(一键启动长短按, 2026-10-29 电控口径: 短按<2s=0x2201→启1, 长按≥2s=0x2202→启2) ----
@@ -120,14 +121,20 @@ class Step1_ScanLeg(State):
 
 
 class Step2_Leg1Grab(State):
-    """批1 抓料: goto 节点6 → 守株(定一纠偏建锚+等色)→组2。"""
+    """批1 抓料: goto 节点6 → 进给100(臂侧横移, 守株抓取位) → 守株(定一纠偏建锚+等色)
+    →组2 → 退回100(节点位再转向下一段)。"""
 
     def execute(self, ctx):
         _goto(ctx, NODE_MATERIAL, "物料盘")
+        mm = WORK_APPROACH_MM.get(NODE_MATERIAL, 0)
+        if mm:
+            ctx.nav.approach(mm)
         if ctx.display:
             ctx.display.set_step("物料盘→守株抓料")
         ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
                                    ctx.task["batch1_colors"], ctx.grab_wait, "批1")
+        if mm:
+            ctx.nav.retreat(mm)
         ctx.stats.append(("批1抓料", ok, tot))
         ctx.current_state = Step3_Leg1Rough()
 
@@ -156,12 +163,17 @@ class Step4_Leg1Buffer(State):
 
 
 class Step5_Leg2Grab(State):
-    """批2: goto 节点6 返回物料盘 → 守株抓料(重新定一纠偏)。"""
+    """批2: goto 节点6 返回物料盘 → 进给100 → 守株抓料(重新定一纠偏) → 退回100。"""
 
     def execute(self, ctx):
         _goto(ctx, NODE_MATERIAL, "物料盘(返回)")
+        mm = WORK_APPROACH_MM.get(NODE_MATERIAL, 0)
+        if mm:
+            ctx.nav.approach(mm)
         ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
                                    ctx.task["batch2_colors"], ctx.grab_wait, "批2")
+        if mm:
+            ctx.nav.retreat(mm)
         ctx.stats.append(("批2抓料", ok, tot))
         ctx.current_state = Step6_Leg2Rough()
 
