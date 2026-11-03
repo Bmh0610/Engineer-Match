@@ -180,7 +180,7 @@ def stack_mode(args):
         import cv2
         for i, m in enumerate(mats[:3], 1):
             bx1, by1, bx2, by2 = map(int, m.box)
-            color = finder.BOX_BGR.get(m.color, (255, 255, 255))
+            color = BOX_BGR.get(m.color, (255, 255, 255))
             cv2.rectangle(disp, (bx1, by1), (bx2, by2), color, 3)
             cv2.putText(disp, f"pos{i}:{m.color} {m.conf:.2f}",
                         (bx1, max(16, by1 - 6)),
