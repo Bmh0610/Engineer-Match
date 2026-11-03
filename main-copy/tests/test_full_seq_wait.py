@@ -161,7 +161,7 @@ def _align(lk, cam, find_fn, matrix, label, timeout):
         dy_right = a * obj.dx + b * obj.dy
         dx_fwd = c * obj.dx + d * obj.dy
         residual = math.hypot(dx_fwd, dy_right)
-        if residual <= C.ALIGN_TOL_MM:
+        if residual <= C.ALIGN_TOL_MM_RING:
             print(f"  ✓ 纠偏结束 (残差 {residual:.1f}mm, {i} 轮)")
             return
         if time.time() > deadline:

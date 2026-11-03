@@ -95,7 +95,7 @@ def _send_move_v(lk, dy_right, dx_fwd):
 
 def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
           offset=(0.0, 0.0)):
-    """整车纠偏: 看-动-再看, 死区 ≤ALIGN_TOL_MM ≤ALIGN_MAX_ITER 轮, 超时带误差继续(保完赛)。
+    """整车纠偏(圆环区/码垛): 看-动-再看, 死区 ≤ALIGN_TOL_MM_RING(1mm) ≤ALIGN_MAX_ITER 轮, 超时带误差继续(保完赛)。
     auto=True 不弹门控直接跑(建锚用); False 回车触发/s 跳过(人工兜底)。
     offset=(右,前) mm: 纠偏结束后补走的固定基准补偿(相机基准点漂移, 2026-11-03)。"""
     if not auto:
@@ -119,7 +119,7 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
         dy_right = a * obj.dx + b * obj.dy
         dx_fwd = c * obj.dx + d * obj.dy
         residual = math.hypot(dx_fwd, dy_right)
-        if residual <= C.ALIGN_TOL_MM:
+        if residual <= C.ALIGN_TOL_MM_RING:
             print(f"  ✓ 纠偏结束 (残差 {residual:.1f}mm, {i} 轮)")
             done = True
             break
@@ -137,6 +137,7 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
 def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
     """转盘定一纠偏(2026-11-04 用户定, 三态): 转动中/无料时**不发任何底盘帧**
     (防底盘追着转动的物料跑), 停歇后才看-动-再看。
+    死区=ALIGN_TOL_MM_MATERIAL(3mm, 用户定: 转盘场景大步快收)。
     目标选择: ALIGN_BOX 框内离画面中心最近的物料优先(对中后恰在抓取窗, 守株
     立即可抓); 框内无料 → 画面最底下物料(离车最近, 对中后进框)。
     0 颗不放弃(转动中模糊会瞬时闪失, 总超时兜底)。终态口径不变=物料对画面中心
@@ -180,7 +181,7 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
         dy_right = a * tgt.dx + b * tgt.dy
         dx_fwd = c * tgt.dx + d * tgt.dy
         residual = math.hypot(dx_fwd, dy_right)
-        if residual <= C.ALIGN_TOL_MM:
+        if residual <= C.ALIGN_TOL_MM_MATERIAL:
             print(f"  ✓ 定一纠偏结束 ({src_tag}料, 残差 {residual:.1f}mm, {round_no} 轮)")
             if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
                 print(f"  [纠偏] 补基准补偿 前{offset[1]:+.1f} 右{offset[0]:+.1f}")
