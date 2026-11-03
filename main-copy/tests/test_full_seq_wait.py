@@ -358,6 +358,8 @@ def main():
     print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
     backend = YOLOBackend(args.model)           # 物料(wuliao 引擎)
     lk = Link(args.port)
+    from display import create_display
+    display = create_display()   # HDMI 物理屏全屏状态窗; 无 DISPLAY 时 None(静默跳过)
     print(f"口径: 观察{C.OBSERVE} 复位{C.RESET} 最大伸{C.ARM_REACH_MAX} "
           f"行距{C.TURN_STEP_MM} 放/抓环高{C.H_PLACE_RING}/{C.H_GRAB_RING} "
           f"| Ctrl+C 退出")
@@ -368,11 +370,21 @@ def main():
         leg_move(lk, 0, 1000, 0, "前进1000(到扫码位)")
         task = scan_step(scan_cam, preview=args.preview)
         _web_task(task)
+        if display:
+            c1 = ' → '.join(task["batch1_colors"])
+            r1 = ','.join(str(r) for r in task["batch1_rings"])
+            c2 = ' → '.join(task["batch2_colors"])
+            r2 = ','.join(str(r) for r in task["batch2_rings"])
+            display.set_task(task['raw'],
+                             f"批1: {c1} | 环号 {r1}",
+                             f"批2: {c2} | 环号 {r2}")
         leg_move(lk, 0, 0, -90, "顺时针转90")
         leg_move(lk, 0, 850, 0, "前进850")
         leg_move(lk, 0, 0, -90, "顺时针转90")
         leg_move(lk, 0, 875, 0, "前进875")
         leg_move(lk, 0, 0, 90, "逆时针转90(机械臂朝物料盘)")
+        if display:
+            display.set_step("守株抓料(批1)")
         action_grab_materials(lk, cam, backend, task, args.wait)
         leg_move(lk, 0, 0, 90, "逆时针转90")
         leg_move(lk, 0, 920, 0, "前进920")
@@ -381,6 +393,8 @@ def main():
     if args.skip_to in ("start", "rough"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
+        if display:
+            display.set_step("粗加工区→放环")
         action_place_rings(lk, cam, task, args.timeout)
         action_grab_rings(lk, task, args.timeout)
         leg_move(lk, 0, -820, 0, "后退820")
@@ -389,6 +403,8 @@ def main():
     if args.skip_to in ("start", "rough", "buffer"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
+        if display:
+            display.set_step("暂存区→放环")
         action_place_rings(lk, cam, task, args.timeout)
         action_grab_rings(lk, task, args.timeout)
     if args.skip_to in ("start", "rough", "buffer", "home"):
@@ -400,6 +416,9 @@ def main():
         leg_move(lk, -50, 0, 0, "左移50")
         leg_move(lk, 0, -50, 0, "后退50(回启停区)")
     print("\n== 全部完成 (账本为零=车在锚点位) ==")
+    if display:
+        display.set_step("全部完成")
+        time.sleep(3)
 
 
 if __name__ == "__main__":

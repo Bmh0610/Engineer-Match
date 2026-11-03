@@ -29,6 +29,7 @@ import config as C  # noqa: E402
 import task.mission as M  # noqa: E402
 from communication.protocol import Mode  # noqa: E402
 from vision.qr import parse_task  # noqa: E402
+from display import create_display  # noqa: E402
 
 
 # ---- 出发点(一键启动长短按, 2026-10-29 电控口径: 短按<2s=0x2201→启1, 长按≥2s=0x2202→启2) ----
@@ -107,6 +108,14 @@ class Step1_ScanLeg(State):
         ctx.task = task
         print(f"  任务码: {task['raw']} | 批1 {task['batch1_colors']} 环{task['batch1_rings']}"
               f" | 批2 {task['batch2_colors']} 环{task['batch2_rings']}")
+        if ctx.display:
+            c1 = ' → '.join(task["batch1_colors"])
+            r1 = ','.join(str(r) for r in task["batch1_rings"])
+            c2 = ' → '.join(task["batch2_colors"])
+            r2 = ','.join(str(r) for r in task["batch2_rings"])
+            ctx.display.set_task(task['raw'],
+                                 f"批1: {c1} | 环号 {r1}",
+                                 f"批2: {c2} | 环号 {r2}")
         ctx.current_state = Step2_Leg1Grab()
 
 
@@ -115,6 +124,8 @@ class Step2_Leg1Grab(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_MATERIAL, "物料盘")
+        if ctx.display:
+            ctx.display.set_step("物料盘→守株抓料")
         ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
                                    ctx.task["batch1_colors"], ctx.grab_wait, "批1")
         ctx.stats.append(("批1抓料", ok, tot))
@@ -200,11 +211,12 @@ class Context:
             "rough2": Step6_Leg2Rough, "stack": Step7_Leg2Stack,
             "home": Step8_ReturnHome}
 
-    def __init__(self, lk, scanner, scan_cam, end_cam, backend,
+    def __init__(self, lk, scanner, scan_cam, end_cam, backend, display,
                  watcher, skip_start=False, start_node=None, grab_wait=60.0,
                  no_vision=False, skip_to=None):
         self.lk, self.scanner, self.scan_cam = lk, scanner, scan_cam
         self.end_cam, self.backend = end_cam, backend
+        self.display = display           # StatusDisplay 或 None(无 DISPLAY 环境)
         self.watcher = watcher          # ObstacleWatcher(前相机+障碍引擎); None=纯跑图
         self.nav = None                 # Step1 构建 NavDriver(须先 launch 再 goto)
         self.skip_start, self.start_node = skip_start, start_node
@@ -278,8 +290,9 @@ def main():
     print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
     backend = YOLOBackend(args.model)              # 物料/码垛判色(wuliao 引擎)
     lk = Link(args.port)
+    display = create_display()   # HDMI 物理屏全屏状态窗; 无 DISPLAY 时 None(静默跳过)
 
-    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend,
+    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend, display,
                   watcher, skip_start=args.skip_start, start_node=args.start_node,
                   grab_wait=args.wait, no_vision=args.no_vision,
                   skip_to=args.skip_to)
