@@ -39,11 +39,13 @@ ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
 _STEP = [0]
 
 
-def run_step(lk, label, tx, ack, timeout=None):
+def run_step(lk, label, tx, ack, timeout=None, gap=1.5):
     """发帧等回执(全自动, 无门控)。
     timeout=None 用 C.CMD_TIMEOUT; MODE5 成套动作传 ACTION_TIMEOUT——只等一次,
     调用方不得再包一层等待(曾双等: run_step 消费回执后 run_action 又空等 35s,
-    每条动作白等一个超时窗, 2026-11-02 实车暴露)。"""
+    每条动作白等一个超时窗, 2026-11-02 实车暴露)。
+    gap=完成后条间(默认1.5s=底盘腿间; 臂/MODE5 调用方传 0=零间隔衔接,
+    2026-11-03 用户定: 到位立刻纠偏/组动作完成立刻发下一条)。"""
     _STEP[0] += 1
     print(f"[{_STEP[0]}] {label}")
     lk.flush()
@@ -63,12 +65,12 @@ def run_step(lk, label, tx, ack, timeout=None):
         print(f"    ✓ {ACK_NAME[ack]}完成 ({time.time()-t0:.1f}s)")
     else:
         print(f"    !! {wait_s:.0f}s 无 {ACK_NAME[ack]} 完成回执")
-    time.sleep(2)
+    time.sleep(gap)
 
 
-def arm(lk, label, pose):
+def arm(lk, label, pose, gap=0):
     run_step(lk, f"{label} {tuple(pose)}", frame(Mode.MOVE_A, *pose),
-             Mode.ACK_ARM)
+             Mode.ACK_ARM, gap=gap)
 
 
 def leg_move(lk, dx, dy, dz, label):
@@ -162,12 +164,13 @@ def _seek_mid_ring(lk, cam, backend, timeout):
 
 # ---- MODE 5 成套动作(三段搬运由下位机执行, 上位机只调用+等 0x0015) ----
 
-def run_action(lk, group, outer, car, timeout):
+def run_action(lk, group, outer, car, timeout, gap=0):
     """发 MODE5 成套动作, 单次等 0x0015(timeout 秒, 等待在 run_step 内);
-    超时告警跳过(不盲目重发——文档警告重发会让动作再做一遍)。"""
+    超时告警跳过(不盲目重发——文档警告重发会让动作再做一遍)。
+    gap=0: 0x0015 即动作完成(协议口径), 立即发下一条/开始下一轮等色。"""
     run_step(lk, f"成套动作 组{group} (车外位{outer}, 车上格{car})",
              frame(Mode.ACTION, int(group), int(outer), int(car)),
-             Mode.ACK_ACTION, timeout=timeout)
+             Mode.ACK_ACTION, timeout=timeout, gap=gap)
 
 
 def action_grab_materials(lk, cam, backend, task, wait):
