@@ -36,6 +36,54 @@ from task.ring import find_rings  # noqa: E402
 ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
             Mode.ACK_GRIPPER: "0x0013夹爪", Mode.ACK_ACTION: "0x0015成套动作"}
 
+# ---- 网页状态显示(Flask, 浏览器访问 Nano_IP:5000) ----
+from flask import Flask
+
+_web_app = Flask(__name__)
+_web = {"html": """<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
+<style>body{font-family:monospace;background:#1a1a2e;color:#e0e0e0;padding:30px;font-size:1.1em}
+h2{color:#64ffda}.box{background:#16213e;padding:12px 16px;border-radius:6px;margin:8px 0}
+.label{color:#8892b0;font-size:0.9em}</style></head><body>
+<h2>⏳ 等待扫码...</h2></body></html>"""}
+
+_web_app = Flask(__name__)
+
+
+@_web_app.route('/')
+def _web_page():
+    return _web["html"]
+
+
+def _web_start(port=5000):
+    from threading import Thread
+    Thread(target=lambda: _web_app.run(host='0.0.0.0', port=port, debug=False),
+           daemon=True, name="web-display").start()
+    print(f"  网页状态面板 → http://0.0.0.0:{port} (局域网内浏览器打开 Nano_IP:{port})")
+
+
+def _web_task(task):
+    """扫码成功后更新网页: 任务码+两批色序/环号。"""
+    c1 = ' → '.join(task["batch1_colors"])
+    r1 = ','.join(str(r) for r in task["batch1_rings"])
+    c2 = ' → '.join(task["batch2_colors"])
+    r2 = ','.join(str(r) for r in task["batch2_rings"])
+    _web["html"] = f"""
+    <html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
+    <style>body{{font-family:monospace;background:#1a1a2e;color:#e0e0e0;padding:30px;font-size:1.1em}}
+    h2{{color:#64ffda}} h3{{color:#bd93f9}} .box{{background:#16213e;padding:12px 16px;
+    border-radius:6px;margin:8px 0;border-left:4px solid #64ffda}}
+    .label{{color:#8892b0;font-size:0.9em}} .tag{{display:inline-block;background:#0f3460;
+    padding:2px 10px;border-radius:4px;margin:2px}}</style></head><body>
+    <h2>📋 任务信息</h2>
+    <div class="box"><span class="label">任务码原文:</span><br>
+    <span style="font-size:1.5em;color:#64ffda">{task['raw']}</span></div>
+    <div class="box"><b>批1</b> (粗加工区放环):<br>
+    <span class="tag">{c1}</span> 环号 <span class="tag">{r1}</span></div>
+    <div class="box"><b>批2</b> (暂存区码垛):<br>
+    <span class="tag">{c2}</span> 环号 <span class="tag">{r2}</span></div>
+    </body></html>"""
+
+
 _STEP = [0]
 
 
@@ -298,6 +346,7 @@ def main():
 
     scan_cam = Camera(C.CAMERA_ID_SCAN, "scan")   # 扫码专用相机(/dev/cam_scan)
     scan_cam.open()
+    _web_start()
     cam = Camera(C.CAMERA_ID_END, "end")          # 末端相机: 守株等色/纠偏/判环
     cam.open()
     print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
@@ -312,6 +361,7 @@ def main():
         leg_move(lk, 150, 0, 0, "右移150(起步对位)")
         leg_move(lk, 0, 1000, 0, "前进1000(到扫码位)")
         task = scan_step(scan_cam, preview=args.preview)
+        _web_task(task)
         leg_move(lk, 0, 0, -90, "顺时针转90")
         leg_move(lk, 0, 850, 0, "前进850")
         leg_move(lk, 0, 0, -90, "顺时针转90")
