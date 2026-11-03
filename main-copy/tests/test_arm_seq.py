@@ -130,7 +130,7 @@ def main():
     two = bool(task["batch2_colors"])
     print(f"任务码 {task['raw']} | 批1 色{c1} 环{r1}"
           + (f" | 批2 色{task['batch2_colors']} 环{task['batch2_rings']}" if two else ""))
-    print("口径: 抓料(2,2,i)按序上盘i / 放环(1,环号,盘格i) / 抓环倒序(3,r,r) / "
+    print("口径: 抓料(2,2,i)按序上盘i / 放环(1,环号,盘格i) / 抓环正序(3,r,r) / "
           "暂区(1,i,i) / 码垛同色查账 | Ctrl+C 退出")
 
     seg("第一圈 (批1)")
