@@ -283,6 +283,7 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
     colors2 = task["batch2_colors"]
     jobs = []                        # (位Y, 盘格Z, 颜色)
     if use_vision:
+        arm_move(lk, C.RESET, "抬臂至标定高度(码垛纠偏前, Y=2090 与三纠偏臂高一定口径一致)")
         align(lk, cam, find_material_fn(backend), C.IMG2BODY,
               "码垛纠偏(对物料建锚)", timeout, auto=True)
         from vision import finder
