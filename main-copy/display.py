@@ -69,8 +69,14 @@ class StatusDisplay:
         self.root.update()
 
     def set_task(self, code, batch1, batch2):
-        """扫码后设任务信息: code=原文, batch1/batch2=色序+环号文字。"""
-        self._code.config(text=code)
+        """扫码后设任务信息: code=原文(任务码分两行, 4组码按+拆两行/2组简写整行),
+        batch1/batch2=色序+环号文字。"""
+        if "+" in code:
+            line1, line2 = code.split("+", 1)
+            shown = f"{line1}\n+{line2}"
+        else:
+            shown = code
+        self._code.config(text=shown)
         self._batch.config(text=batch1 + "\n" + batch2)
         self.root.update()
 
