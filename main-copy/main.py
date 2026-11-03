@@ -137,7 +137,7 @@ class Step2_Leg1Grab(State):
                                    ctx.task["batch1_colors"], ctx.grab_wait, "批1")
         if mm:
             ctx.nav.retreat(mm)
-        ctx.nav.approach(C.ARM_CENTER_COMP_MM)   # 臂不在中心: 修正后车体=图上节点
+        ctx.nav.approach(C.ARM_CENTER_COMP_MM, axis="y")   # 臂不在中心: 沿y+前推30, 修正后车体=图上节点
         ctx.stats.append(("批1抓料", ok, tot))
         ctx.current_state = Step3_Leg1Rough()
 
@@ -178,7 +178,7 @@ class Step5_Leg2Grab(State):
                                    ctx.task["batch2_colors"], ctx.grab_wait, "批2")
         if mm:
             ctx.nav.retreat(mm)
-        ctx.nav.approach(C.ARM_CENTER_COMP_MM)
+        ctx.nav.approach(C.ARM_CENTER_COMP_MM, axis="y")
         ctx.stats.append(("批2抓料", ok, tot))
         ctx.current_state = Step6_Leg2Rough()
 

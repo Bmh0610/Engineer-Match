@@ -124,17 +124,24 @@ class NavDriver:
             print(f"    末对齐{round(math.degrees(stop_heading)):+d}°: 转向{turn:.2f}")
         print(f"    总代价 {total:.2f} (1.0≈4s)")
 
-    def approach(self, mm):
-        """图外进给腿(到达工作点并旋转对齐后、纠偏/动作组前): 车体系 x+(臂侧)横移 mm 接近区域。
-        不入图不动记账; 工作组完成后必须 retreat 等量退回, 否则下一段 goto
+    def approach(self, mm, axis="x"):
+        """图外进给腿(到达工作点并旋转对齐后、纠偏/动作组前), 不入图不动记账。
+        axis="x"(默认)=车体系 x+(臂侧)横移(转盘接近); axis="y"=y+ 车头方向前进
+        (臂不在中心补偿等)。工作组完成后必须等量退回, 否则下一段 goto
         的转向中心偏离节点、整条边走歪。"""
         if mm:
-            self._send_move(mm, 0, 0, f"工作点横移进给(x+){mm:.0f}mm(不入图)")
+            if axis == "y":
+                self._send_move(0, mm, 0, f"工作点前进(y+){mm:.0f}mm(不入图)")
+            else:
+                self._send_move(mm, 0, 0, f"工作点横移进给(x+){mm:.0f}mm(不入图)")
 
-    def retreat(self, mm):
-        """图外退回腿(工作组完成后、转向下一段前): 车体系 x-(臂侧反向)横移 mm 回节点位。"""
+    def retreat(self, mm, axis="x"):
+        """图外退回腿(工作组完成后、转向下一段前), 不入图; axis 同 approach。"""
         if mm:
-            self._send_move(-mm, 0, 0, f"工作点横移退回(x-){mm:.0f}mm(不入图)")
+            if axis == "y":
+                self._send_move(0, -mm, 0, f"工作点后退(y-){mm:.0f}mm(不入图)")
+            else:
+                self._send_move(-mm, 0, 0, f"工作点横移退回(x-){mm:.0f}mm(不入图)")
 
     def finish(self):
         """收车对位腿(goto 回出发节点后): 恢复发车朝向 → 按 START_JOG 反向量退回摆车位,
