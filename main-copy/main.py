@@ -33,6 +33,7 @@ from display import create_display  # noqa: E402
 from task.nav_drive import WORK_APPROACH_MM  # noqa: E402
 
 
+
 # ---- 出发点(一键启动长短按, 2026-10-29 电控口径: 短按<2s=0x2201→启1, 长按≥2s=0x2202→启2) ----
 # 摆车约定=车头朝二维码板: 启1 出发车头朝 +y(π/2), 启2 出发朝 -y(-π/2)。
 ZONE_NAME = {1: "启停区1", 3: "启停区2"}    # 节点号=map.yaml 编号(1~9)
@@ -122,7 +123,8 @@ class Step1_ScanLeg(State):
 
 class Step2_Leg1Grab(State):
     """批1 抓料: goto 节点6 → 进给100(臂侧横移, 守株抓取位) → 守株(定一纠偏建锚+等色)
-    →组2 → 退回100(节点位再转向下一段)。"""
+    →组2 → 退回100 → 前进30(臂不在中心补偿: 退回后车体在节点-30, 前推回节点位)
+    → 之后按地图节点跑。"""
 
     def execute(self, ctx):
         _goto(ctx, NODE_MATERIAL, "物料盘")
@@ -135,6 +137,7 @@ class Step2_Leg1Grab(State):
                                    ctx.task["batch1_colors"], ctx.grab_wait, "批1")
         if mm:
             ctx.nav.retreat(mm)
+        ctx.nav.approach(C.ARM_CENTER_COMP_MM)   # 臂不在中心: 修正后车体=图上节点
         ctx.stats.append(("批1抓料", ok, tot))
         ctx.current_state = Step3_Leg1Rough()
 
@@ -163,7 +166,8 @@ class Step4_Leg1Buffer(State):
 
 
 class Step5_Leg2Grab(State):
-    """批2: goto 节点6 返回物料盘 → 进给100 → 守株抓料(重新定一纠偏) → 退回100。"""
+    """批2: goto 节点6 返回物料盘 → 进给100 → 守株抓料(重新定一纠偏) → 退回100
+    → 前进30(臂不在中心补偿) → 按图跑。"""
 
     def execute(self, ctx):
         _goto(ctx, NODE_MATERIAL, "物料盘(返回)")
@@ -174,6 +178,7 @@ class Step5_Leg2Grab(State):
                                    ctx.task["batch2_colors"], ctx.grab_wait, "批2")
         if mm:
             ctx.nav.retreat(mm)
+        ctx.nav.approach(C.ARM_CENTER_COMP_MM)
         ctx.stats.append(("批2抓料", ok, tot))
         ctx.current_state = Step6_Leg2Rough()
 
