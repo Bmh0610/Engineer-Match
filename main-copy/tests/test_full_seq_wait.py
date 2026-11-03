@@ -16,7 +16,8 @@
 
 用法: python3 tests/test_full_seq_wait.py [--skip-to start|rough|buffer|home]
       [--wait 60]
-每步回车执行, 打印帧 hex, 等对应完成回执, 条间 2s; Ctrl+C 退出。
+全自动连跑(2026-11-03 用户定: 全文件无人工门控, 到位即纠偏/动作), 打印帧 hex
++回执, 条间 2s; Ctrl+C 退出。
 """
 import math
 import sys
@@ -38,23 +39,13 @@ ACK_NAME = {Mode.ACK_CHASSIS: "0x0011底盘", Mode.ACK_ARM: "0x0012臂",
 _STEP = [0]
 
 
-def confirm(msg):
-    try:
-        input(f"\n[{_STEP[0]}] <- 回车: {msg}")
-    except EOFError:
-        pass
-
-
-def run_step(lk, label, tx, ack, auto=False, timeout=None):
-    """发帧等回执; auto=True 跳过回车确认直接执行(连续段), 默认人工门控。
+def run_step(lk, label, tx, ack, timeout=None):
+    """发帧等回执(全自动, 无门控)。
     timeout=None 用 C.CMD_TIMEOUT; MODE5 成套动作传 ACTION_TIMEOUT——只等一次,
     调用方不得再包一层等待(曾双等: run_step 消费回执后 run_action 又空等 35s,
     每条动作白等一个超时窗, 2026-11-02 实车暴露)。"""
     _STEP[0] += 1
-    if not auto:
-        confirm(f"{label}\n  hex={tx.hex(' ').upper()}")
-    else:
-        print(f"[{_STEP[0]}] {label}")
+    print(f"[{_STEP[0]}] {label}")
     lk.flush()
     lk.ser.write(tx)
     wait_s = C.CMD_TIMEOUT if timeout is None else timeout
@@ -75,15 +66,15 @@ def run_step(lk, label, tx, ack, auto=False, timeout=None):
     time.sleep(2)
 
 
-def arm(lk, label, pose, auto=False):
+def arm(lk, label, pose):
     run_step(lk, f"{label} {tuple(pose)}", frame(Mode.MOVE_A, *pose),
-             Mode.ACK_ARM, auto=auto)
+             Mode.ACK_ARM)
 
 
 def leg_move(lk, dx, dy, dz, label):
-    """行程腿 move_v(不入账——腿间移动, 非工作区微调); 连续跑不回车。"""
+    """行程腿 move_v(不入账——腿间移动, 非工作区微调)。"""
     run_step(lk, f"[腿] {label} (右{dx:+.0f} 前{dy:+.0f} 转{dz:+.0f})",
-             frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS, auto=True)
+             frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS)
 
 
 # ---- 纠偏(看-动-再看) ----
@@ -101,18 +92,9 @@ def _send_move_v(lk, dy_right, dx_fwd):
     return False
 
 
-def _align(lk, cam, find_fn, matrix, label, timeout, auto=False):
+def _align(lk, cam, find_fn, matrix, label, timeout):
     """整车纠偏: 看-动-再看, 死区3mm ≤5轮, 超时带误差继续(保完赛)。
-    auto=True 不弹门控直接跑(定一/建锚用); 默认回车触发, s=跳过(人工兜底)。"""
-    if not auto:
-        try:
-            ans = input(f"\n<- 回车={label}(看-动-再看) / s=跳过: ").strip().lower()
-        except EOFError:
-            print("  (无输入) 跳过纠偏")
-            return
-        if ans == "s":
-            print("  !! 跳过纠偏(人工兜底)")
-            return
+    无门控全自动(2026-11-03 用户定: 到地方直接纠偏)。"""
     deadline = time.time() + C.ALIGN_TIMEOUT
     for i in range(1, C.ALIGN_MAX_ITER + 1):
         obj, _fr = finder.find_stable(find_fn, cam,
@@ -185,7 +167,7 @@ def run_action(lk, group, outer, car, timeout):
     超时告警跳过(不盲目重发——文档警告重发会让动作再做一遍)。"""
     run_step(lk, f"成套动作 组{group} (车外位{outer}, 车上格{car})",
              frame(Mode.ACTION, int(group), int(outer), int(car)),
-             Mode.ACK_ACTION, auto=True, timeout=timeout)
+             Mode.ACK_ACTION, timeout=timeout)
 
 
 def action_grab_materials(lk, cam, backend, task, wait):
@@ -194,7 +176,7 @@ def action_grab_materials(lk, cam, backend, task, wait):
     print("\n===== 动作组①: 抓料 (守株待兔: 定一后原地等色, 车全程不动) =====")
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
     _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
-           "定一纠偏(建锚)", wait, auto=True)   # 定一免确认, 直接跑
+           "定一纠偏(建锚)", wait)
     for i, color in enumerate(task["batch1_colors"]):
         print(f"\n<等 {color}: 转进窗+停歇即发 MODE5, ≤{wait:.0f}s>")
         mat, _fr = finder.wait_for_color(backend, cam, color,
@@ -218,10 +200,10 @@ def action_place_rings(lk, cam, backend, task, timeout, mode="rough"):
     (1, i, i) 恒等正序——抓环恒等后盘格i=环i的料, 恰满足 G2 两区同位(零账本)。"""
     print(f"\n===== 动作组②: 放环 (MODE5 组1: 车→地面, "
           f"{'任务码环号序' if mode == 'rough' else '恒等'}) =====")
-    arm(lk, "回复位", C.RESET, auto=True)
+    arm(lk, "回复位", C.RESET)
     _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
     _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
-           "对中环纠偏(建锚)", timeout, auto=True)
+           "对中环纠偏(建锚)", timeout)
     rings = task["batch1_rings"]
     if mode == "rough":
         seq = [(ring_no, i, task["batch1_colors"][i - 1])
