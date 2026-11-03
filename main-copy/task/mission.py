@@ -10,7 +10,8 @@
   恰满足 G2 两区同位(零账本)。
 - 抓环(组3): 纯记忆不开视觉(放环后环上数字被物料挡), 正序恒等(2026-11-03 定)——
   放过的环号从小到大 (3, r, r): 环 r → 盘格 r。
-- 码垛(组1, 第二圈暂存区): 批2 同色叠批1 正上方。账本=批2 抓环后盘格 z 上的颜色
+- 码垛(组4, 第二圈暂存区): 批2 同色叠批1 正上方(放置高度1000 组4 内部自理)。
+  账本=批2 抓环后盘格 z 上的颜色
   是 G3[G4.index(z)]; 视觉版拍帧 find_materials 识别环上物料(画面左/中/右=位 1/2/3,
   朝向实车核对)定 Y、账本定 Z; --no-vision 推演版按 (1, stack_plan[色], G4[i])。
   层高(叠批1 物料顶+76mm): MODE5 组1 无层参数, 下探由下位机自理(移交电控)。
@@ -21,7 +22,8 @@ import time
 import config as C
 from communication.protocol import Mode, frame
 
-ACTION_LABEL = {1: "放环(车→地面)", 2: "抓料(原料区→车)", 3: "抓环(地面→车)"}
+ACTION_LABEL = {1: "放环(车→地面)", 2: "抓料(原料区→车)", 3: "抓环(地面→车)",
+                4: "码垛(车→地面第二层)"}
 
 
 def action_label(group, outer, car):
@@ -281,7 +283,8 @@ def stack_plan_of(task):
 
 
 def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
-    """码垛(第二圈暂存区): 批2 同色叠批1 正上方(组1, 层高下位机自理)。
+    """码垛(第二圈暂存区): 批2 同色叠批1 正上方——**动作组4**(叠放第二层,
+    放置高度1000 由下位机自理; 前提地面该位已有批1 物料=流程保证)。
     vision: 对物料纠偏(数字被挡不判环)→拍帧检出环上物料按画面 x 排序(左/中/右=位
     1/2/3, 朝向实车核对)→每颗颜色查盘上账本定 Z→(1, 位, 盘格)。
     no-vision: 按 (1, stack_plan[色], G4[k]) 推演(cam/backend 传 None)。gated 逐条回车。
@@ -324,7 +327,7 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
     ok = 0
     for y, z, c in jobs:
         print(f"  · 码 {c}: 位{y} ← 盘格{z}")
-        if run_action(lk, 1, y, z, timeout, gated=gated):
+        if run_action(lk, 4, y, z, timeout, gated=gated):
             ok += 1
     print(f"== 码垛完成 ({ok}/{len(colors2)}) ==")
     return ok, len(colors2)
