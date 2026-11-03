@@ -141,12 +141,25 @@ def _seek_mid_ring(lk, cam, backend, timeout):
     机械臂不在车中心, 到环区可能对着侧环——每次纠偏前判环纠正(用户 2026-10-27)。"""
     deadline = time.time() + timeout
     moved = 0
+    n_none = 0
+    t_line = time.time()
     while time.time() < deadline and moved < 3:
         f = cam.read_latest(timeout=0.2)
         if f is None:
+            n_none += 1
+            if time.time() - t_line >= 1.0:
+                print(f"  [判环] 无帧(read_latest None×{n_none})——相机/链路问题?")
+                t_line = time.time()
             time.sleep(0.2)
             continue
         rings = find_rings(backend, f)
+        now = time.time()
+        if now - t_line >= 1.0:   # 每秒诊断行(与 test_ring_diagnose 同款)
+            raw = backend.infer(f)
+            seg = [f"{r.digit}号({r.cx / f.shape[1]:.2f})" for r in rings]
+            raws = " ".join(f"cls{d.cls_id}:{d.conf:.2f}" for d in raw[:5])
+            print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'} | 原始: {raws or '(空)'}")
+            t_line = now
         if not rings:
             time.sleep(0.2)
             continue
