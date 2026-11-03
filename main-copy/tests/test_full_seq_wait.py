@@ -260,8 +260,9 @@ def action_grab_rings(lk, task, timeout):
 # ---- 扫码 ----
 
 def scan_step(cam, preview=False):
-    """扫码: 末端相机尝试 SCAN_TIMEOUT(扫码相机未接), 超时自动用兜底码; 无回车门控。
-    preview=True 实时开扫码相机画面(检测框, 无 DISPLAY 自动降级)。"""
+    """扫码: 专用扫码相机(/dev/cam_scan, 2026-11-03 修——此前误用末端相机扫码),
+    超时自动用兜底码; 无回车门控。preview=True 实时开扫码画面(检测框,
+    无 DISPLAY 自动降级)。"""
     from vision.qr import QrScanner
     print(f"<扫码: ≤{C.SCAN_TIMEOUT:.0f}s, 超时自动用兜底码>")
     task = QrScanner().scan_from_camera(cam, C.SCAN_TIMEOUT, preview=preview)
@@ -299,7 +300,9 @@ def main():
     from vision.detect import YOLOBackend
     from communication.protocol import Link
 
-    cam = Camera(C.CAMERA_ID_END, "end")
+    scan_cam = Camera(C.CAMERA_ID_SCAN, "scan")   # 扫码专用相机(/dev/cam_scan)
+    scan_cam.open()
+    cam = Camera(C.CAMERA_ID_END, "end")          # 末端相机: 守株等色/纠偏/判环
     cam.open()
     print(f"加载物料模型 {args.model} / 环模型 {args.model_ring} ...")
     backend = YOLOBackend(args.model)           # 物料(wuliao 引擎)
@@ -313,7 +316,7 @@ def main():
     if args.skip_to == "start":
         leg_move(lk, 150, 0, 0, "右移150(起步对位)")
         leg_move(lk, 0, 1000, 0, "前进1000(到扫码位)")
-        task = scan_step(cam, preview=args.preview)
+        task = scan_step(scan_cam, preview=args.preview)
         leg_move(lk, 0, 0, -90, "顺时针转90")
         leg_move(lk, 0, 850, 0, "前进850")
         leg_move(lk, 0, 0, -90, "顺时针转90")
