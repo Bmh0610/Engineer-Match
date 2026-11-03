@@ -175,6 +175,8 @@ RING_ACK_TOTAL = 25             # 放3总回执: 每颗盘上4+环上4=8 ×3, +�
 # 标定(臂高不变, 目标面换"叠好的料顶面"): tests/test_img2body_cal.py --stack
 # + tools/calib_ratio.py --stack。初值换算法: 已标套 × (H_cam-h_ref)/(H_cam-h_stack),
 # H_cam=相机离地高(Y=1810 位下实测一次, 待量), h 环=0/码垛≈物料高(60mm)。
-IMG2BODY_STACK = None   # 待标定(None=码垛纠偏回退圆环矩阵 IMG2BODY_RING + 告警)
-PX_PER_MM_STACK = None  # 待标定(参考: PX_PER_MM_RING × (H_cam-0)/(H_cam-60) 量级)
+IMG2BODY_STACK = (-0.0138, -0.4405, -0.4464, 0.0020)   # 2026-11-04 实测标定(100mm×2组,
+                                # 自检残差 0.00mm; test_img2body_cal --stack 解算;
+                                # 反解验证 f→前100/右0, r→右100/前0 精确还原)
+PX_PER_MM_STACK = 2.184  # 2026-11-04 实测(30mm 物料直径×6 样本, 离散 1.8%)
 
