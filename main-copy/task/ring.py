@@ -77,7 +77,7 @@ def find_rings(frame, digit=None):
     if digit is None and len(items) >= 3 and len(known) < 3:
         top = sorted(items, key=lambda i: -i[3][0])[:3]      # 外长轴最大的 3 个
         srt = sorted(top, key=lambda i: i[1])                # cx 升序=左→右
-        out = [Ring(k + 1, item[7] if item[0] else 0.0, item[4], item[1], item[2],
+        out = [Ring(k + 1, item[5] if item[0] else 0.0, item[4], item[1], item[2],
                     item[1] - (w / 2 + ox), item[2] - (h / 2 + oy))
                for k, item in enumerate(srt)]
         print(f"  [判环] 数字识别不全({len(known)}/3), 按 x 排序兜底: 左→右=1,2,3")
