@@ -67,8 +67,7 @@ class Step0_WaitStart(State):
                   f" (--start-node 可改)")
             ctx.current_state = Step1_ScanLeg()
             return
-        print("Step0 等待一键启动: 短按(0x2201)=启1 / 长按(0x2202)=启2 / "
-              "通用开始(0x0020)=启1兜底 ...")
+        print("Step0 等待一键启动: 短按(0x2201)=启停区1 / 长按(0x2202)=启停区2 ...")
         while True:
             for f in ctx.lk.poll():
                 if f.mode == Mode.BUTTON_START:
@@ -77,11 +76,6 @@ class Step0_WaitStart(State):
                 elif f.mode == Mode.BUTTON_START_2:
                     ctx.start_node = 3
                     print("  收到一键启动: 长按 → 启停区2")
-                elif f.mode == Mode.START_ANY:
-                    ctx.start_node = 1
-                    print("  收到 0x0020 通用开始信号(电控固件口径, 不分长短按) "
-                          "→ 按启停区1 处理; 若实际摆的是启2, Ctrl+C 后加 "
-                          "--skip-start --start-node 3 重跑")
                 else:
                     continue
                 ctx.start_heading = START_HEADING[ctx.start_node]
