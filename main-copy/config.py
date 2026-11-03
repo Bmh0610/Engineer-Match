@@ -135,8 +135,10 @@ GRAB_ACK_TOTAL = 23   # 3颗总回执: 近端7 + 端位8×2 = 23(0x0012×17 + 0x
 MODEL_PATH_RING = "/home/popcorn-car/main-copy/vision/best.engine"   # 环检测=原统一权重
                                 # best.engine(2026-11-02 用户定: 圆环用原权重, 环类 7/8/9
                                 # 与 RING_CLS 对齐); 笔记本调试改旧 best.pt
-RING_CLS = {1: 7, 2: 8, 3: 9}   # 数字→模型类别号(共用现 10 类模型=circle1/2/3;
-                                # 拆分重训后按新模型类别 id 改, 如 {1:0, 2:1, 3:2})
+RING_CLS = {1: 7, 2: 8, 3: 9}   # 数字→模型类别号(仅 RING_DETECT_YOLO=True 时用)
+RING_DETECT_YOLO = False        # 环检测器开关(2026-11-02 用户定: 默认 OpenCV ring_cv
+                                # 模板匹配+排列恢复, 不需要模型; True=切回 YOLO 环引擎
+                                # MODEL_PATH_RING/best.engine 做 A/B 对比)
 RING_CONF = 0.4                 # 数字环检出门槛(贴纸数字小, 比物料 0.5 放宽)
 RING_PITCH_MM = 150.0           # 环距(用户 2026-10-26 实测): 左环=中环左150, 右环=中环右150;
                                 # 放置=每环各自整车纠偏把环送到复位位正下方(±150盲送作废);

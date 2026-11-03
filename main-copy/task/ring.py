@@ -37,10 +37,22 @@ class Ring:
 
 
 def find_rings(backend, frame, conf=None):
-    """一帧 → 数字环列表。数字=YOLO 类别判定; 位置=画面 cx 排序, 与数字无关。"""
+    """一帧 → 数字环列表(Ring: digit 1/2/3, 位置=画面中心偏差 px)。
+
+    检测器由 config.RING_DETECT_YOLO 选择:
+      False(默认)=OpenCV 视觉(vision.ring_cv, 模板匹配+排列恢复; 不需要模型,
+        backend 形参保留兼容、此路径不使用);
+      True=YOLO 环引擎(MODEL_PATH_RING/best.engine, backend 必传)。"""
+    h, w = frame.shape[:2]
+    if not C.RING_DETECT_YOLO:
+        from vision.ring_cv import find as _cv_find
+        out = []
+        for digit_s, cx, cy, _outer, box, conf_v in _cv_find(frame):
+            out.append(Ring(int(digit_s), conf_v, box, cx, cy,
+                            cx - w / 2, cy - h / 2))
+        return out
     conf = C.RING_CONF if conf is None else conf
     cls2digit = {v: k for k, v in C.RING_CLS.items()}
-    h, w = frame.shape[:2]
     out = []
     for d in backend.infer(frame, classes=list(C.RING_CLS.values())):
         if d.conf < conf or d.cls_id not in cls2digit:
