@@ -47,10 +47,10 @@ PX_PER_MM = 3.675              # 2026-10-24 标定(转180°重装后新高度): 
 #     PX_PER_MM_CENTER 两值, 并把 grab.py 里的引用按阶段分开即可。
 
 # ---- 阶段A 定位纠偏(移植 gcxl adjust_position_to_target 骨架) ----
-ALIGN_TOL_MM = 1.0       # 死区: 残差 ≤ 此值收工(2026-11-03 用户改 3.0→1.0 收紧; gcxl 4px×0.72 同量级)
+ALIGN_TOL_MM = 1.5       # 死区: 残差 ≤ 此值收工(2026-11-04 用户定 1.0→1.5: 小死区抖动期拖轮次, 给转盘启动暴增的机会)
 ALIGN_MAX_ITER = 10      # 最多几轮 看-动-再看(2026-11-03 用户定 5→10)
 ALIGN_TIMEOUT = 30.0     # 总超时(秒), 超时告警继续(保完赛)
-ALIGN_SETTLE = 0.3       # 每轮 move_v 后等车沉降再取帧
+ALIGN_SETTLE = 0.5       # 每轮 move_v 后等车沉降再判定(2026-11-04 用户定 0.3→0.5)
 STABLE_FRAMES = 2        # 连续 N 帧中心位移 < STABLE_TOL_PX 才采用(滤框抖)
 STABLE_TOL_PX = 2.0
 # 图像偏差→车体系符号: (图像x→车体右 dy, 图像y→车体前 dx) 的系数。

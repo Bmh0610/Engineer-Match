@@ -149,6 +149,8 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
         f1 = cam.read_latest(timeout=0.2)
         m1 = [] if f1 is None else finder.find_materials(
             backend, f1, conf=0.5, px_per_mm=C.PX_PER_MM)
+        time.sleep(0.2)   # 判稳基线: 两帧隔 0.2s——转盘最慢 36°/s 物料位移约 10px+
+                          # (远超 4px 阈值), 慢转/启动段必检出(短窗口曾漏检致追料)
         f2 = cam.read_latest(timeout=0.2)
         m2 = [] if f2 is None else finder.find_materials(
             backend, f2, conf=0.5, px_per_mm=C.PX_PER_MM)
