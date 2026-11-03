@@ -242,7 +242,7 @@ def place_rings(lk, cam, rings, timeout, mode="rough", colors=None):
     arm_move(lk, C.RESET, "回复位")
     seek_mid_ring(lk, cam, timeout)
     align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
-          "对中环纠偏(建锚)", timeout, auto=True, offset=C.RING_ALIGN_OFFSET)
+          "对中环纠偏(建锚)", timeout, auto=True)
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]
     else:
@@ -295,8 +295,7 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
                   "(同场景几何最接近; 标定: test_img2body_cal.py --stack 后填 config)")
         align(lk, cam, find_material_fn(backend), matrix,
-              "码垛纠偏(对物料建锚)", timeout, auto=True,
-              offset=C.RING_ALIGN_OFFSET)
+              "码垛纠偏(对物料建锚)", timeout, auto=True,)
         from vision import finder
         f = cam.read_latest(timeout=1.0)
         mats = [] if f is None else finder.find_materials(

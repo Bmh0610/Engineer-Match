@@ -38,16 +38,21 @@ class Ring:
     dy: float
 
 
-def find_rings(frame):
+def find_rings(frame, digit=None):
     """一帧 → 数字环列表(Ring: digit 1/2/3, 位置=画面中心偏差 px)。
 
-    检测器=OpenCV(vision.ring_cv): 黑线同心圆环 → 中心数字模板匹配 + 三环排列恢复;
-    无需模型/权重(YOLO 环检测已退役, 2026-11-02 用户定)。"""
+    检测器=OpenCV(vision.ring_cv): 黑线同心圆环 → 中心数字模板匹配 + 排列恢复。
+    digit: 目标环号(1/2/3), None=全部。"""
     h, w = frame.shape[:2]
+    ox, oy = C.RING_CAM_CENTER_OFFSET_PX   # 相机中心点偏移(纠偏基准)
     out = []
-    for digit_s, cx, cy, _outer, box, conf_v in _cv_find(frame):
-        out.append(Ring(int(digit_s), conf_v, box, cx, cy,
-                        cx - w / 2, cy - h / 2))
+    for item in _cv_find(frame, keep_unknown=bool(digit is None)):
+        digit_s, cx, cy, _outer, box, conf_v = item
+        d = int(digit_s)
+        if digit is not None and d != digit:
+            continue
+        out.append(Ring(d, conf_v, box, cx, cy,
+                        cx - (w / 2 + ox), cy - (h / 2 + oy)))
     return out
 
 

@@ -45,7 +45,6 @@ def main():
 
     print(f"回车=测一轮(偏差+纠偏帧); q 退出; 收敛=残差≤{C.ALIGN_TOL_MM:.0f}mm")
     rnd = 0
-    applied_offset = False   # 基准补偿只随第一帧纠偏走一次(2026-11-03)
     while True:
         try:
             if input(f"\n[第{rnd + 1}轮] 回车测偏差 / q 退出: ").strip().lower() == "q":
@@ -57,12 +56,6 @@ def main():
             print("  !! 未检出数字环(核对臂在环观测位/环区在画面内), 车不动, 回车重测")
             continue
         dy_right, dx_fwd = sp._to_body(obj)
-        if not applied_offset:
-            off_r, off_f = C.RING_ALIGN_OFFSET
-            dy_right += off_r
-            dx_fwd += off_f
-            applied_offset = True
-            print(f"  含基准补偿: 右{off_r:+.1f} 前{off_f:+.1f}mm")
         residual = math.hypot(dy_right, dx_fwd)
         rnd += 1
         print(f"  数字→位置: {sp._digit_map(fr)}")

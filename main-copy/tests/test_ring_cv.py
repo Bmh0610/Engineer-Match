@@ -44,8 +44,9 @@ def draw(frame, results, show_all=False, all_ellipses=None):
         if box:
             cv2.rectangle(disp, box[:2],
                           (box[0] + box[2], box[1] + box[3]), (255, 0, 0), 1)
-    # 相机中心(蓝十字, 纠偏基准=画面中心) ↔ 圆环中心(红叉): 连线+纠偏修正量
-    ch_x, ch_y = disp.shape[1] // 2, disp.shape[0] // 2
+    # 相机中心(蓝十字, 纠偏基准=画面中心+RING_CAM_CENTER_OFFSET_PX) ↔ 圆环中心(红叉): 连线+纠偏修正量
+    ch_x = int(disp.shape[1] / 2 + C.RING_CAM_CENTER_OFFSET_PX[0])
+    ch_y = int(disp.shape[0] / 2 + C.RING_CAM_CENTER_OFFSET_PX[1])
     cv2.drawMarker(disp, (ch_x, ch_y), (255, 0, 0), cv2.MARKER_CROSS, 26, 2)
     cv2.putText(disp, "camera center", (ch_x + 10, ch_y - 10),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
