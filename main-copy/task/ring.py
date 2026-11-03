@@ -62,16 +62,25 @@ def find_rings(frame, digit=None):
     + 打印 ring_cv 中间统计(2026-11-04 定案取数)。"""
     h, w = frame.shape[:2]
     ox, oy = C.RING_CAM_CENTER_OFFSET_PX   # 相机中心点偏移(纠偏基准)
+    items = _cv_find(frame, keep_unknown=True)
+    known = [item for item in items if item[0] is not None]
     out = []
-    for item in _cv_find(frame, keep_unknown=bool(digit is None)):
-        digit_s, cx, cy, _outer, box, conf_v = item
-        if digit_s is None:
-            continue
+    for digit_s, cx, cy, _outer, box, conf_v in known:
         d = int(digit_s)
         if digit is not None and d != digit:
             continue
         out.append(Ring(d, conf_v, box, cx, cy,
                         cx - (w / 2 + ox), cy - (h / 2 + oy)))
+    # 几何兜底(2026-11-04): 三环全检出而数字识别不全时, 按画面 x 排序赋 1/2/3
+    # (用户定死口径: 圆环从左到右=1,2,3; 运动模糊帧数字模板匹配不可靠——
+    #  实测模糊"2"最佳形状分 0.638<0.78 且被误识成 3)。数字齐全时以数字为准。
+    if digit is None and len(items) >= 3 and len(known) < 3:
+        top = sorted(items, key=lambda i: -i[3][0])[:3]      # 外长轴最大的 3 个
+        srt = sorted(top, key=lambda i: i[1])                # cx 升序=左→右
+        out = [Ring(k + 1, item[7] if item[0] else 0.0, item[4], item[1], item[2],
+                    item[1] - (w / 2 + ox), item[2] - (h / 2 + oy))
+               for k, item in enumerate(srt)]
+        print(f"  [判环] 数字识别不全({len(known)}/3), 按 x 排序兜底: 左→右=1,2,3")
     if not out and digit is None:
         _dump_miss(frame, "ring")
     return out
