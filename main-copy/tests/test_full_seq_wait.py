@@ -45,8 +45,11 @@ def confirm(msg):
         pass
 
 
-def run_step(lk, label, tx, ack, auto=False):
-    """发帧等回执; auto=True 跳过回车确认直接执行(连续段), 默认人工门控。"""
+def run_step(lk, label, tx, ack, auto=False, timeout=None):
+    """发帧等回执; auto=True 跳过回车确认直接执行(连续段), 默认人工门控。
+    timeout=None 用 C.CMD_TIMEOUT; MODE5 成套动作传 ACTION_TIMEOUT——只等一次,
+    调用方不得再包一层等待(曾双等: run_step 消费回执后 run_action 又空等 35s,
+    每条动作白等一个超时窗, 2026-11-02 实车暴露)。"""
     _STEP[0] += 1
     if not auto:
         confirm(f"{label}\n  hex={tx.hex(' ').upper()}")
@@ -54,9 +57,10 @@ def run_step(lk, label, tx, ack, auto=False):
         print(f"[{_STEP[0]}] {label}")
     lk.flush()
     lk.ser.write(tx)
+    wait_s = C.CMD_TIMEOUT if timeout is None else timeout
     t0 = time.time()
     got = None
-    while time.time() - t0 < C.CMD_TIMEOUT:
+    while time.time() - t0 < wait_s:
         for f in lk.poll():
             print(f"    RX {f}")
             if f.mode == ack and got is None:
@@ -67,7 +71,7 @@ def run_step(lk, label, tx, ack, auto=False):
     if got:
         print(f"    ✓ {ACK_NAME[ack]}完成 ({time.time()-t0:.1f}s)")
     else:
-        print(f"    !! {C.CMD_TIMEOUT:.0f}s 无 {ACK_NAME[ack]} 完成回执")
+        print(f"    !! {wait_s:.0f}s 无 {ACK_NAME[ack]} 完成回执")
     time.sleep(2)
 
 
@@ -177,20 +181,11 @@ def _seek_mid_ring(lk, cam, backend, timeout):
 # ---- MODE 5 成套动作(三段搬运由下位机执行, 上位机只调用+等 0x0015) ----
 
 def run_action(lk, group, outer, car, timeout):
-    """发 MODE5 成套动作, 等 0x0015 完成回执; 超时告警跳过(不盲目重发——
-    文档警告重发会让动作再做一遍)。"""
+    """发 MODE5 成套动作, 单次等 0x0015(timeout 秒, 等待在 run_step 内);
+    超时告警跳过(不盲目重发——文档警告重发会让动作再做一遍)。"""
     run_step(lk, f"成套动作 组{group} (车外位{outer}, 车上格{car})",
              frame(Mode.ACTION, int(group), int(outer), int(car)),
-             Mode.ACK_ACTION, auto=True)
-    if timeout <= 0:
-        return
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        for f in lk.poll():
-            if f.mode == Mode.ACK_ACTION:
-                return
-        time.sleep(0.05)
-    print(f"  !! {timeout:.0f}s 未收到 0x0015 完成回执(保完赛继续)")
+             Mode.ACK_ACTION, auto=True, timeout=timeout)
 
 
 def action_grab_materials(lk, cam, backend, task, wait):
