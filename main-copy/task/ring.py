@@ -48,13 +48,41 @@ def _dump_miss(frame, tag):
         print(f"  [判环] 存证失败: {e}")
 
 
+def _roi_precise_center(frame, xyxy, expand=0.25):
+    """bbox 内 ring_cv 几何精定位环中心(2026-11-05 用户定: YOLO 定身份+
+    OpenCV 定中心): bbox 外扩 expand → fit_ellipses+同心成组+多层加权估中心
+    → 精确中心映射回全图坐标; ROI 内无候选/异常 → None(调用方降级 bbox 中心)。"""
+    try:
+        from vision import ring_cv
+        x1, y1, x2, y2 = xyxy
+        bw, bh = x2 - x1, y2 - y1
+        mx, my = int(bw * expand), int(bh * expand)
+        X0, Y0 = max(0, int(x1) - mx), max(0, int(y1) - my)
+        X1, Y1 = min(frame.shape[1], int(x2) + mx), min(frame.shape[0], int(y2) + my)
+        roi = frame[Y0:Y1, X0:X1]
+        if roi.size == 0:
+            return None
+        ellipses = ring_cv.fit_ellipses(ring_cv.software_relight(roi),
+                                        ring_cv.MAJOR_LO, ring_cv.MAJOR_HI)
+        if not ellipses:
+            return None
+        markers = ring_cv.group_concentric(ellipses, ring_cv.MIN_RINGS)
+        if not markers:
+            return None
+        center, outer = max(markers, key=lambda m: m[1][0])[:2]
+        return (center[0] + X0, center[1] + Y0)   # marker[0]=(cx,cy) 已是加权精中心
+    except Exception:
+        return None
+
+
 def find_rings(frame, digit=None, backend=None):
     """一帧 → 数字环列表(Ring: digit 1/2/3, 位置=画面中心偏差 px)。
 
-    检测器=YOLO(backend, 2026-11-05 用户定换回——ring_cv 数字模板匹配对
-    模糊帧不可靠已退役): classes=RING_CLS.values()(circle1/2/3)→cls 反查 digit。
-    backend None(引擎未加载/缺文件)→返回 [](判环跳过, 保完赛)。
-    digit: 目标环号(1/2/3), None=全部。0 检出自动存证 /tmp/ring_miss.jpg。"""
+    混合定位(2026-11-05 用户定): YOLO 定身份(几号环, 类别映射), OpenCV 定中心
+    (bbox 内 ring_cv 几何精定位——多层同心加权, 比 bbox 中心准); 几何失败降级
+    bbox 中心。YOLO 全空 → 全画面 ring_cv 几何 + x 排序兜底(左1中2右3, 用户
+    定死口径) → 仍 0 存证 /tmp/ring_miss.jpg。
+    backend None(引擎未加载/缺文件)→返回 [](判环跳过, 保完赛)。"""
     if backend is None:
         return []
     h, w = frame.shape[:2]
@@ -64,12 +92,34 @@ def find_rings(frame, digit=None, backend=None):
     for d in backend.infer(frame, classes=list(C.RING_CLS.values())):
         if d.conf < C.RING_CONF or d.cls_id not in cls2digit:
             continue
-        cx, cy = (d.xyxy[0] + d.xyxy[2]) / 2, (d.xyxy[1] + d.xyxy[3]) / 2
         digit_d = cls2digit[d.cls_id]
         if digit is not None and digit_d != digit:
             continue
+        bx_cx = (d.xyxy[0] + d.xyxy[2]) / 2
+        bx_cy = (d.xyxy[1] + d.xyxy[3]) / 2
+        # 几何精定位(bbox 内 ring_cv); 失败降级 bbox 中心
+        precise = _roi_precise_center(frame, d.xyxy)
+        cx, cy = precise if precise else (bx_cx, bx_cy)
+        if not precise:
+            print(f"  [判环] {digit_d} 号环几何降级 bbox 中心")
         out.append(Ring(digit_d, d.conf, d.xyxy, cx, cy,
                         cx - (w / 2 + ox), cy - (h / 2 + oy)))
+    if not out and digit is None:
+        # YOLO 全空 → 全画面 ring_cv 几何 + x 排序兜底(身份来自排列, 左1中2右3)
+        try:
+            from vision import ring_cv
+            results, _ = ring_cv.analyze(frame, keep_unknown=True)
+            if len(results) >= 3:
+                top = sorted(results, key=lambda r: -r[1][0])[:3]
+                srt = sorted(top, key=lambda r: r[0][0])
+                out = [Ring(k + 1, r[7] if r[5] else 0.0,
+                            (r[0][0] - 40, r[0][1] - 40, r[0][0] + 40, r[0][1] + 40),
+                            r[0][0], r[0][1],
+                            r[0][0] - (w / 2 + ox), r[0][1] - (h / 2 + oy))
+                       for k, r in enumerate(srt)]
+                print(f"  [判环] YOLO 未检出, 全画面几何+x 排序兜底 {len(out)} 环")
+        except Exception:
+            pass
     if not out and digit is None:
         _dump_miss(frame, "ring")
     return out
