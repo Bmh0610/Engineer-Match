@@ -1,9 +1,9 @@
 """MODE5 成套动作业务库(2026-11-02 用户定稿口径): 抓料/放环/抓环/码垛 + 判环纠偏。
 
 口径(456+321 例, 详见 tests/test_arm_seq.py docstring 验算表):
-- 抓料(组2): 守株待兔——臂缩回复位→定一纠偏建锚→车全程不动, 任务色进窗+连帧稳定
-  即发 (2, 2, i)。Y=2 恒定=原料区取料工位(全程只此一个抓取点), Z=i=第 i 个抓到
-  的上盘格 i。批1/批2 复用本函数(批2 调用时重新定一)。
+- 抓料(组2): 守株待兔·对号入座(2026-11-03 定)——臂缩回复位→定一纠偏建锚→车全程
+  不动, **任意色**进窗+停歇稳定即发 (2, 2, k); Y=2 恒定=取料工位, Z=k=该色在
+  任务码色序中的位次(识别对=色必落自己的位次格, 顺序账自动成立)。批1/批2 复用。
 - 放环(组1): 臂回复位→判环找中环→对中环纠偏建锚(唯一底盘动作), 然后逐轮发:
   rough 模式(粗加工区): (1, rings[i], 盘格i)——取盘格 i 的料放 rings[i] 号环;
   buffer 模式(暂存区第一圈): (1, i, i) 恒等正序——盘格 i(=环 i 的料)放暂存位 i,
@@ -175,31 +175,42 @@ def seek_mid_ring(lk, cam, backend, timeout):
 # ---- 动作组①: 抓料(守株待兔, 批1/批2 通用) ----
 
 def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
-    """守株抓料: 臂缩回复位→定一纠偏建锚→车全程不动, 逐色 wait_for_color
-    (进窗+连帧稳定)→组2 (2, 2, i)。Y=2 恒定=原料区取料工位(车不动臂不动,
-    物料由转盘送进夹爪正下方, 全程只有一个抓取点); Z=i=第 i 个抓到的上盘格 i
-    (跳抓不占格)。返回 (ok, total)。"""
+    """守株抓料·对号入座版(2026-11-03 用户定): 臂缩回复位→定一纠偏建锚→车全程
+    不动——**任意色**进窗+停歇稳定即抓(不再等特定色, 命中率不挑色), 盘格
+    Z=该色在任务码色序中的位次(色 c 在第 k 位 → 组2 (2,2,k) 放盘格 k)。
+    Y=2 恒定=原料区取料工位。识别失败/色序外的料不抓(等下轮停歇再看),
+    单窗超时剩余色跳过(保完赛)。返回 (ok, total)。"""
     from vision import finder
-    print(f"\n===== {batch} 抓料 (守株: 定一后原地等色, 车全程不动) =====")
+    print(f"\n===== {batch} 抓料 (守株·对号入座: 任意色停歇即抓, Z=色序位) =====")
     arm_move(lk, C.RESET, "缩回复位(定一纠偏位)")
     align(lk, cam, find_material_fn(backend), C.IMG2BODY,
           "定一纠偏(建锚)", wait, auto=True)
+    order = list(colors)
+    grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
+    skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)
     ok = 0
-    for i, color in enumerate(colors, 1):
-        print(f"\n<等 {color}: 转进窗+停歇即发 MODE5, ≤{wait:.0f}s>")
-        mat, _fr = finder.wait_for_color(backend, cam, color,
-                                         px_per_mm=C.PX_PER_MM,
-                                         timeout=max(0.5, wait))
+    while len(grabbed) < len(order):
+        print(f"\n<等任意色进窗+停歇即抓, 色序{order} 已抓{sorted(grabbed)} "
+              f"跳过{sorted(skip)}, ≤{wait:.0f}s>")
+        mat, _fr = finder.wait_any_color(backend, cam, px_per_mm=C.PX_PER_MM,
+                                         timeout=max(0.5, wait),
+                                         exclude=grabbed | skip)
         if mat is None:
-            print(f"  !! {wait:.0f}s 未等到 {color}, 跳过该色(保完赛, 盘格空置)")
+            print(f"  !! {wait:.0f}s 未等到新色稳定进窗, 剩余色跳过(保完赛, 盘格空置)")
+            break
+        if mat.color not in order:
+            print(f"  !! 检出 {mat.color} 不在任务码色序(识别存疑), 本次不再处理该色")
+            skip.add(mat.color)
             continue
+        k = order.index(mat.color) + 1
         a, b, c, d = C.IMG2BODY
         print(f"  ✓ 看到: {mat.color} (右{a*mat.dx+b*mat.dy:+.1f} "
-              f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 组2 抓取上盘格{i}")
-        if run_action(lk, 2, 2, i, C.ACTION_TIMEOUT):
+              f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 任务码第{k}位 → 组2 放盘格{k}")
+        if run_action(lk, 2, 2, k, C.ACTION_TIMEOUT):
             ok += 1
-    print(f"\n== {batch} 抓料完成 ({ok}/{len(colors)}, 车在锚点位) ==")
-    return ok, len(colors)
+        grabbed.add(mat.color)   # 成败都记账: 超时重发会让动作再做一遍(文档警告)
+    print(f"\n== {batch} 抓料完成 ({ok}/{len(order)}, 车在锚点位) ==")
+    return ok, len(order)
 
 
 # ---- 动作组②③: 放环 + 抓环 ----

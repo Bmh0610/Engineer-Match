@@ -1,10 +1,10 @@
 """整场流程联调·守株待兔抓取版(2026-10-27): 与 test_full_seq.py 唯一区别=抓料换笨办法。
 
-抓料(笨办法): 定一纠偏(复位位, 建锚)之后车一动不动, 臂停复位位盯夹爪正下方——
-任务码第1组下一色进抓取窗(GRAB_WINDOW)且连帧稳定(转盘停歇, finder.wait_for_color)
-→ 发 MODE5 组2(下位机抓原料区→放车上格) → 等 0x0015(35s)。无人工确认(视觉判定+
-稳定即发); 单色等待超时默认 60s(--wait 可改; 比赛值按实车转盘一圈周期调,
-建议≥1.5圈), 超时跳过该色槽位不推进(保完赛)。
+抓料(对号入座, 2026-11-03 定): 定一纠偏(复位位, 建锚)之后车一动不动, 臂停复位位
+盯夹爪正下方——**任意色**进抓取窗(GRAB_WINDOW)且连帧稳定(转盘停歇,
+finder.wait_any_color)即抓, 盘格=该色在任务码色序中的位次(色 c 第 k 位→盘格 k,
+如 213: 检出红→盘2、黄→盘1、蓝→盘3) → 发 MODE5 组2 → 等 0x0015(35s)。
+不再等特定色顺序, 命中不挑色; 识别失败的料不抓等下轮; 单窗超时剩余色跳过(保完赛)。
 
 其余(腿/扫码/放环 MODE5 组1 车上格z→地面y / 抓环 MODE5 组3 倒序恒等 环r→盘格r /
 判环找中环/对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
@@ -174,24 +174,35 @@ def run_action(lk, group, outer, car, timeout, gap=0):
 
 
 def action_grab_materials(lk, cam, backend, task, wait):
-    """抓料×3轮(守株待兔): 定一(复位位, 建锚)后车一动不动, 原地等色+稳定
-    → MODE5 组2(下位机抓原料区→放车上格)。无人工确认。"""
-    print("\n===== 动作组①: 抓料 (守株待兔: 定一后原地等色, 车全程不动) =====")
+    """抓料×3轮(守株待兔·对号入座): 定一(复位位, 建锚)后车一动不动——
+    **任意色**进窗+停歇稳定即抓(不等特定色), 盘格=该色在任务码色序中的位次
+    → MODE5 组2 (2, 2, k)。识别失败的料不抓等下轮, 单窗超时剩余色跳过(保完赛)。"""
+    print("\n===== 动作组①: 抓料 (守株·对号入座: 任意色停歇即抓, 车全程不动) =====")
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
     _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
            "定一纠偏(建锚)", wait)
-    for i, color in enumerate(task["batch1_colors"]):
-        print(f"\n<等 {color}: 转进窗+停歇即发 MODE5, ≤{wait:.0f}s>")
-        mat, _fr = finder.wait_for_color(backend, cam, color,
-                                         px_per_mm=C.PX_PER_MM,
-                                         timeout=max(0.5, wait))
+    order = list(task["batch1_colors"])
+    grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
+    skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)
+    while len(grabbed) < len(order):
+        print(f"\n<等任意色进窗+停歇即抓, 色序{order} 已抓{sorted(grabbed)} "
+              f"跳过{sorted(skip)}, ≤{wait:.0f}s>")
+        mat, _fr = finder.wait_any_color(backend, cam, px_per_mm=C.PX_PER_MM,
+                                         timeout=max(0.5, wait),
+                                         exclude=grabbed | skip)
         if mat is None:
-            print(f"  !! {wait:.0f}s 未等到 {color}, 跳过该色(保完赛)")
+            print(f"  !! {wait:.0f}s 未等到新色稳定进窗, 剩余色跳过(保完赛, 盘格空置)")
+            break
+        if mat.color not in order:
+            print(f"  !! 检出 {mat.color} 不在任务码色序(识别存疑), 本次不再处理该色")
+            skip.add(mat.color)
             continue
+        k = order.index(mat.color) + 1
         a, b, c, d = C.IMG2BODY
         print(f"  ✓ 看到: {mat.color} (偏差 右{a*mat.dx+b*mat.dy:+.1f} "
-              f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 发 MODE5 组2 抓取放盘")
-        run_action(lk, 2, 2, i + 1, C.ACTION_TIMEOUT)   # Y=2 恒定取料工位, Z=车上格i+1
+              f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 任务码第{k}位 → 组2 放盘格{k}")
+        run_action(lk, 2, 2, k, C.ACTION_TIMEOUT)   # Y=2 取料工位, Z=色序位k
+        grabbed.add(mat.color)   # 成败都记账: 超时重发会让动作再做一遍(文档警告)
     print("\n== 抓料完成 (车全程在锚点位, 账本为零) ==")
 
 

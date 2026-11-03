@@ -229,6 +229,35 @@ def wait_for_color(backend, cam, color, px_per_mm=None, timeout=None,
     return None, None
 
 
+def wait_any_color(backend, cam, px_per_mm=None, timeout=None,
+                   window=None, conf=None, exclude=()):
+    """守株待兔·对号入座版(2026-11-03 用户定): 任意色进抓取窗+连帧稳定
+    (转盘停歇)即返回 (Material, frame)——抓取顺序由转盘实况决定, 盘格由
+    调用方按任务码色序查表(色 c 在第 k 位 → 放盘格 k), 不再等特定色。
+    exclude: 已抓色(防御性过滤, 正常该料抓走后不会再检出)。"""
+    timeout = C.WAIT_COLOR_TIMEOUT if timeout is None else timeout
+    window = C.GRAB_WINDOW if window is None else window
+    conf = C.CONFIRM_CONF if conf is None else conf
+    px_per_mm = _warn_px_ratio(px_per_mm)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        f = cam.read_latest()
+        if f is None:
+            time.sleep(C.FRAME_GAP)
+            continue
+        h, w = f.shape[:2]
+        for m in find_materials(backend, f, conf=conf, px_per_mm=px_per_mm):
+            if m.color in exclude:
+                continue
+            if (window[0] * w <= m.cx <= window[1] * w
+                    and window[2] * h <= m.cy <= window[3] * h):
+                m2 = confirm_color(backend, cam, m.color, px_per_mm, conf)
+                if m2:
+                    return m2, f
+        time.sleep(C.FRAME_GAP)
+    return None, None
+
+
 # ---- 跨帧后处理(移植沈航 common.py 思路): 消歧 → 关联 → 确认 → 低通 → 保持 ----
 
 # 易混对裁决赢家: blue/light_blue 按沈航实测经验归 light_blue(更特殊类);
