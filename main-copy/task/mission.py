@@ -161,7 +161,9 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
     目标选择: ALIGN_BOX 框内离画面中心最近的物料优先(对中后恰在抓取窗, 守株
     立即可抓); 框内无料 → 画面最底下物料(离车最近, 对中后进框)。
     0 颗不放弃(转动中模糊会瞬时闪失, 总超时兜底)。终态口径不变=物料对画面中心
-    (下位机抓取点示教依据)。offset 同 align()——纠偏结束后补走固定基准补偿。"""
+    (下位机抓取点示教依据)。offset 同 align()——纠偏结束后补走固定基准补偿。
+    返回纠偏目标物料(跳过首颗抓取用, 2026-11-05 用户定: 纠偏料不抓, 从下一个
+    进窗的料开始——车刚 move_v 完的余震窗口避开), 超时/未检出返回 None。"""
     from vision import finder
     deadline = time.time() + timeout
     x0, x1, y0, y1 = C.ALIGN_BOX
@@ -207,7 +209,7 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
             if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
                 print(f"  [纠偏] 补基准补偿 前{offset[1]:+.1f} 右{offset[0]:+.1f}")
                 _send_move_v(lk, offset[0], offset[1])
-            return
+            return tgt   # 返回纠偏目标物料(调用方跳过首颗抓取, 2026-11-05 用户定)
         if time.time() > deadline:
             break
         print(f"  [纠偏] 第{round_no}轮({src_tag}料): 前{dx_fwd:+.1f} 右{dy_right:+.1f} "
@@ -217,6 +219,7 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
     print("  [纠偏] 超时, 带误差继续(保完赛)")
     if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
         _send_move_v(lk, offset[0], offset[1])
+    return tgt if round_no else None   # 超时也带最后目标(有轮次才有 tgt)
 
 
 def find_material_fn(backend):
@@ -244,19 +247,19 @@ def find_stack_material_fn(backend):
     return find
 
 
-def find_ring_mid_fn():
+def find_ring_mid_fn(backend=None):
     """中环检测闭包: 只返回 digit==2 的环(建锚用; 仅环空数字可见时可靠)。
     未检出 2 号环 → None(调用方放弃纠偏, 保完赛)。"""
     from task.ring import find_rings
 
     def find(f):
-        rings = find_rings(f)
+        rings = find_rings(f, backend=backend)
         mid = [r for r in rings if r.digit == 2]
         return min(mid, key=lambda r: r.dx ** 2 + r.dy ** 2) if mid else None
     return find
 
 
-def seek_mid_ring(lk, cam, timeout):
+def seek_mid_ring(lk, cam, backend, timeout):
     """纠偏前判环找中环: 对准 1 号环 y-RING_SEEK_STEP、3 号 y+RING_SEEK_STEP,
     直到对准 2 号环再纠偏; 未见环直接纠偏兜底。仅放环开场(环空数字可见)用;
     码垛段数字被批1物料挡, 不做判环(直接对物料纠偏)。"""
@@ -274,7 +277,7 @@ def seek_mid_ring(lk, cam, timeout):
                 t_line = time.time()
             time.sleep(0.2)
             continue
-        rings = find_rings(f)
+        rings = find_rings(f, backend=backend)
         now = time.time()
         if now - t_line >= 1.0:   # 每秒诊断行
             seg = [f"{r.digit}号({r.cx / f.shape[1]:.2f})" for r in rings]
@@ -306,17 +309,24 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
     from vision import finder
     print(f"\n===== {batch} 抓料 (守株·对号入座: 任意色停歇即抓, Z=色序位) =====")
     arm_move(lk, C.RESET, "缩回复位(定一纠偏位)")
-    align_material_turntable(lk, cam, backend, wait)   # 三态: 转动暂停/停歇框内优先
+    c_first = align_material_turntable(lk, cam, backend, wait)   # 三态; 返回纠偏料
+    skip_first = {c_first.color} if c_first else set()
+    if skip_first:
+        print(f"  · 纠偏料 {c_first.color} 不作首抓(用户定), 等下一颗进窗")
     order = list(colors)
     grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
     skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)
     ok = 0
     while len(grabbed) < len(order):
         print(f"\n<等任意色进窗+停歇即抓, 色序{order} 已抓{sorted(grabbed)} "
-              f"跳过{sorted(skip)}, ≤{wait:.0f}s>")
+              f"跳过{sorted(skip | skip_first)}, ≤{wait:.0f}s>")
         mat, _fr = finder.wait_any_color(backend, cam, px_per_mm=C.PX_PER_MM,
                                          timeout=max(0.5, wait),
-                                         exclude=grabbed | skip)
+                                         exclude=grabbed | skip | skip_first)
+        if mat is None:
+            print(f"  !! {wait:.0f}s 未等到新色稳定进窗, 剩余色跳过(保完赛, 盘格空置)")
+            break
+        skip_first.clear()   # 首颗已跳过(抓到任意一颗后, 纠偏料转回可正常抓)
         if mat is None:
             print(f"  !! {wait:.0f}s 未等到新色稳定进窗, 剩余色跳过(保完赛, 盘格空置)")
             _dump_miss_frame(_last_frame(cam), "/tmp/mat_miss.jpg", "等色超时")
@@ -338,7 +348,7 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
 
 # ---- 动作组②③: 放环 + 抓环 ----
 
-def place_rings(lk, cam, rings, timeout, mode="rough", colors=None):
+def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
     """放环(组1): 回复位→判环找中环→对中环纠偏建锚→逐轮发。
     mode='rough': (1, rings[i], 盘格i) 按任务码环号序(粗加工区, G2/G4);
     mode='buffer': (1, i, i) 恒等正序(暂存区第一圈, 零账本)。返回 (ok, total)。"""
@@ -346,8 +356,8 @@ def place_rings(lk, cam, rings, timeout, mode="rough", colors=None):
     print(f"\n===== 放环 ({'粗加工区' if mode == 'rough' else '暂存区'}) =====")
     arm_move(lk, C.RESET, "回复位")
     arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
-    seek_mid_ring(lk, cam, timeout)
-    align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
+    seek_mid_ring(lk, cam, backend, timeout)
+    align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
           "对中环纠偏(建锚)", timeout, auto=True)
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]

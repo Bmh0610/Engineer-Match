@@ -180,15 +180,15 @@ def find_material_fn(backend):
     return find
 
 
-def find_ring_mid_fn():
+def find_ring_mid_fn(backend=None):
     """中环=离画面中心最近的数字环(建锚用; 建锚时环空数字可见)。"""
     def find(f):
-        rings = find_rings(f)
+        rings = find_rings(f, backend=backend)
         return min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2) if rings else None
     return find
 
 
-def _seek_mid_ring(lk, cam, timeout):
+def _seek_mid_ring(lk, cam, backend, timeout):
     """纠偏前判环找中环: 相机对着几号环, 1号(左)→y-80mm, 3号(右)→y+80mm,
     直到对准2号环(中环)再纠偏; 未见环直接交给纠偏兜底。放环开场环空数字可见。
     机械臂不在车中心, 到环区可能对着侧环——每次纠偏前判环纠正(用户 2026-10-27)。"""
@@ -205,7 +205,7 @@ def _seek_mid_ring(lk, cam, timeout):
                 t_line = time.time()
             time.sleep(0.2)
             continue
-        rings = find_rings(f)
+        rings = find_rings(f, backend=backend)
         now = time.time()
         if now - t_line >= 1.0:   # 每秒诊断行
             seg = [f"{r.digit}号({r.cx / f.shape[1]:.2f})" for r in rings]
@@ -272,7 +272,7 @@ def action_grab_materials(lk, cam, backend, task, wait, colors=None):
 
 # ---- 动作组②: 放环(盘→环, MODE5 组1: 车→地面) ----
 
-def action_place_rings(lk, cam, task, timeout, mode="rough", rings=None, colors=None):
+def action_place_rings(lk, cam, backend, task, timeout, mode="rough", rings=None, colors=None):
     """放环×3轮: 判环找中环+对中环纠偏建锚(唯一底盘动作) → MODE5 组1(车→地面)。
     rough(粗加工区): (1, rings[i], 盘格i) 按任务码环号序; buffer(暂存区, 第一圈):
     (1, i, i) 恒等正序——抓环恒等后盘格i=环i的料, 恰满足 G2 两区同位(零账本)。"""
@@ -280,8 +280,8 @@ def action_place_rings(lk, cam, task, timeout, mode="rough", rings=None, colors=
           f"{'任务码环号序' if mode == 'rough' else '恒等'}) =====")
     arm(lk, "回复位", C.RESET)
     arm(lk, "圆环纠偏位(前伸32mm)", C.RING_ALIGN)
-    _seek_mid_ring(lk, cam, timeout)   # 判环: 非2号沿y±80找中环
-    _align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
+    _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
+    _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout)
     rings = rings or task["batch1_rings"]
     colors = colors or task["batch1_colors"]
@@ -344,6 +344,8 @@ def main():
     ap = argparse.ArgumentParser(description="整场流程联调·守株待兔抓取版")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
+    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
+                    help="圆环检测引擎(YOLO 换回; 过渡期=best.engine circle7/8/9)")
     ap.add_argument("--skip-to", choices=("start", "rough", "buffer", "grab2", "home"),
                     default="start",
                     help="start=两圈全程(默认); rough/buffer/grab2=从该段起跑"
@@ -371,8 +373,13 @@ def main():
         print(f"  状态页面: http://localhost:5000 (浏览器手动打开)")
     cam = Camera(C.CAMERA_ID_END, "end")          # 末端相机: 守株等色/纠偏/判环
     cam.open()
-    print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
+    print(f"加载物料模型 {args.model} / 圆环模型 {args.model_ring} ...")
     backend = YOLOBackend(args.model)           # 物料(wuliao 引擎)
+    try:
+        backend_ring = YOLOBackend(args.model_ring)   # 圆环(YOLO 换回; 缺文件→None)
+    except Exception as e:
+        print(f"  ⚠ 圆环引擎加载失败({e}): 判环将跳过(保完赛)")
+        backend_ring = None
     lk = Link(args.port)
     from display import create_display
     display = create_display()   # HDMI 物理屏全屏状态窗; 无 DISPLAY 时 None(静默跳过)
@@ -412,7 +419,7 @@ def main():
             task = parse_task(C.DEFAULT_TASK_CODE)
         if display:
             display.set_step("粗加工区→放环(批1)")
-        action_place_rings(lk, cam, task, args.timeout)                    # G2
+        action_place_rings(lk, cam, backend, task, args.timeout)                    # G2
         action_grab_rings(lk, task, args.timeout)
         leg_move(lk, 0, -820, 0, "后退820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
@@ -422,7 +429,7 @@ def main():
             task = parse_task(C.DEFAULT_TASK_CODE)
         if display:
             display.set_step("暂存区→放环(批1, 物料留位等码垛)")
-        action_place_rings(lk, cam, task, args.timeout, mode="buffer")    # 恒等, 只放环
+        action_place_rings(lk, cam, backend, task, args.timeout, mode="buffer")    # 恒等, 只放环
         # 批1 暂存区不抓环——物料留在暂存位, 批2 码垛叠其上(比赛规则)
 
     # ---- 回物料盘(批2): 摆回批1抓料结束位(位置+朝向), 腿距待实车校准 ----
@@ -450,7 +457,7 @@ def main():
         leg_move(lk, 0, 0, 90, "逆时针转90")
         if display:
             display.set_step("粗加工区→放环(批2)")
-        action_place_rings(lk, cam, task, args.timeout,
+        action_place_rings(lk, cam, backend, task, args.timeout,
                            rings=task["batch2_rings"], colors=task["batch2_colors"])
         action_grab_rings(lk, task, args.timeout, rings=task["batch2_rings"])
         leg_move(lk, 0, -820, 0, "后退820")

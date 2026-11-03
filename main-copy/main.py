@@ -137,7 +137,7 @@ class Step3_Leg1Rough(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_ROUGH, "粗加工区")
-        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam,
+        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
                                 ctx.task["batch1_rings"], C.ACTION_TIMEOUT, mode="rough")
         ok2, t2 = M.grab_rings(ctx.lk, ctx.task["batch1_rings"], C.ACTION_TIMEOUT)
         ctx.stats += [("批1放环", ok1, t1), ("批1抓环", ok2, t2)]
@@ -149,7 +149,7 @@ class Step4_Leg1Buffer(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_BUFFER, "暂存区")
-        ok, tot = M.place_rings(ctx.lk, ctx.end_cam,
+        ok, tot = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
                                 ctx.task["batch1_rings"], C.ACTION_TIMEOUT, mode="buffer")
         ctx.stats.append(("批1暂存区放环", ok, tot))
         ctx.current_state = Step5_Leg2Grab()
@@ -171,7 +171,7 @@ class Step6_Leg2Rough(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_ROUGH, "粗加工区")
-        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam,
+        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
                                 ctx.task["batch2_rings"], C.ACTION_TIMEOUT, mode="rough")
         ok2, t2 = M.grab_rings(ctx.lk, ctx.task["batch2_rings"], C.ACTION_TIMEOUT)
         ctx.stats += [("批2放环", ok1, t1), ("批2抓环", ok2, t2)]
@@ -211,11 +211,12 @@ class Context:
             "rough2": Step6_Leg2Rough, "stack": Step7_Leg2Stack,
             "home": Step8_ReturnHome}
 
-    def __init__(self, lk, scanner, scan_cam, end_cam, backend, display,
-                 watcher, skip_start=False, start_node=None, grab_wait=60.0,
-                 no_vision=False, skip_to=None):
+    def __init__(self, lk, scanner, scan_cam, end_cam, backend, backend_ring,
+                 display, watcher, skip_start=False, start_node=None,
+                 grab_wait=60.0, no_vision=False, skip_to=None):
         self.lk, self.scanner, self.scan_cam = lk, scanner, scan_cam
         self.end_cam, self.backend = end_cam, backend
+        self.backend_ring = backend_ring   # 圆环检测(YOLO, 2026-11-05 换回); None=判环跳过
         self.display = display           # StatusDisplay 或 None(无 DISPLAY 环境)
         self.watcher = watcher          # ObstacleWatcher(前相机+障碍引擎); None=纯跑图
         self.nav = None                 # Step1 构建 NavDriver(须先 launch 再 goto)
@@ -244,6 +245,8 @@ def main():
     ap = argparse.ArgumentParser(description="智能搬运主状态机(两圈 MODE5 版)")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
+    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
+                    help="圆环检测引擎(YOLO, 2026-11-05 换回; 过渡期=best.engine)")
     ap.add_argument("--skip-start", action="store_true",
                     help="跳过一键启动等待(电控 0x2201/0x2202 未实现时用)")
     ap.add_argument("--start-node", type=int, choices=(1, 3), default=None,
@@ -287,12 +290,18 @@ def main():
         watcher = ObstacleWatcher(obstacle_backend, front_cam, calib)
     else:
         print("节点检测已关闭(--no-check): 纯跑图")
-    print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
+    print(f"加载物料模型 {args.model} / 圆环模型 {args.model_ring} ...")
     backend = YOLOBackend(args.model)              # 物料/码垛判色(wuliao 引擎)
+    try:
+        backend_ring = YOLOBackend(args.model_ring)   # 圆环(YOLO 换回; 缺文件→None)
+    except Exception as e:
+        print(f"  ⚠ 圆环引擎加载失败({e}): 判环将跳过(保完赛)")
+        backend_ring = None
     lk = Link(args.port)
     display = create_display()   # HDMI 物理屏全屏状态窗; 无 DISPLAY 时 None(静默跳过)
 
-    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend, display,
+    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend, backend_ring,
+                  display,
                   watcher, skip_start=args.skip_start, start_node=args.start_node,
                   grab_wait=args.wait, no_vision=args.no_vision,
                   skip_to=args.skip_to)

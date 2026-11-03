@@ -22,8 +22,7 @@ from dataclasses import dataclass
 import config as C
 from communication.protocol import Mode
 from vision.finder import find_stable
-from vision.ring_cv import find as _cv_find
-from vision.ring_cv import analyze as _cv_analyze
+
 
 _DEFAULT_ORDER = (1, 2, 3)   # 未检出数字的默认次序(用户口径"未检出默认123")
 
@@ -40,47 +39,37 @@ class Ring:
 
 
 def _dump_miss(frame, tag):
-    """0 检出存证: 现场帧覆盖写 /tmp/ring_miss.jpg + ring_cv 中间统计一行
-    (分辨 没候选(阈值/光照) / 有环被滤(参数) / 有环数字不识(模板))。"""
+    """0 检出存证: 现场帧覆盖写 /tmp/ring_miss.jpg(定案取数, 静默兜底)。"""
     try:
         import cv2
         cv2.imwrite("/tmp/ring_miss.jpg", frame)
-        results, _ = _cv_analyze(frame, keep_unknown=True)
-        n_digit = sum(1 for r in results if r[5] is not None)
-        n_unknown = sum(1 for r in results if r[5] is None)
-        print(f"  [判环cv] 存证 /tmp/ring_miss.jpg | 成组{n_digit + n_unknown} "
-              f"(数字{n_digit} 未知{n_unknown}) —— 图有环=参数/光照问题, 无环=视野外")
-    except Exception as e:   # 存证失败不干扰主流程
-        print(f"  [判环cv] 存证失败: {e}")
+        print(f"  [判环] 存证 /tmp/ring_miss.jpg ({tag})")
+    except Exception as e:
+        print(f"  [判环] 存证失败: {e}")
 
 
-def find_rings(frame, digit=None):
+def find_rings(frame, digit=None, backend=None):
     """一帧 → 数字环列表(Ring: digit 1/2/3, 位置=画面中心偏差 px)。
 
-    检测器=OpenCV(vision.ring_cv): 黑线同心圆环 → 中心数字模板匹配 + 排列恢复。
-    digit: 目标环号(1/2/3), None=全部。0 检出时自动存证 /tmp/ring_miss.jpg
-    + 打印 ring_cv 中间统计(2026-11-04 定案取数)。"""
+    检测器=YOLO(backend, 2026-11-05 用户定换回——ring_cv 数字模板匹配对
+    模糊帧不可靠已退役): classes=RING_CLS.values()(circle1/2/3)→cls 反查 digit。
+    backend None(引擎未加载/缺文件)→返回 [](判环跳过, 保完赛)。
+    digit: 目标环号(1/2/3), None=全部。0 检出自动存证 /tmp/ring_miss.jpg。"""
+    if backend is None:
+        return []
     h, w = frame.shape[:2]
     ox, oy = C.RING_CAM_CENTER_OFFSET_PX   # 相机中心点偏移(纠偏基准)
-    items = _cv_find(frame, keep_unknown=True)
-    known = [item for item in items if item[0] is not None]
+    cls2digit = {v: k for k, v in C.RING_CLS.items()}
     out = []
-    for digit_s, cx, cy, _outer, box, conf_v in known:
-        d = int(digit_s)
-        if digit is not None and d != digit:
+    for d in backend.infer(frame, classes=list(C.RING_CLS.values())):
+        if d.conf < C.RING_CONF or d.cls_id not in cls2digit:
             continue
-        out.append(Ring(d, conf_v, box, cx, cy,
+        cx, cy = (d.xyxy[0] + d.xyxy[2]) / 2, (d.xyxy[1] + d.xyxy[3]) / 2
+        digit_d = cls2digit[d.cls_id]
+        if digit is not None and digit_d != digit:
+            continue
+        out.append(Ring(digit_d, d.conf, d.xyxy, cx, cy,
                         cx - (w / 2 + ox), cy - (h / 2 + oy)))
-    # 几何兜底(2026-11-04): 三环全检出而数字识别不全时, 按画面 x 排序赋 1/2/3
-    # (用户定死口径: 圆环从左到右=1,2,3; 运动模糊帧数字模板匹配不可靠——
-    #  实测模糊"2"最佳形状分 0.638<0.78 且被误识成 3)。数字齐全时以数字为准。
-    if digit is None and len(items) >= 3 and len(known) < 3:
-        top = sorted(items, key=lambda i: -i[3][0])[:3]      # 外长轴最大的 3 个
-        srt = sorted(top, key=lambda i: i[1])                # cx 升序=左→右
-        out = [Ring(k + 1, item[5] if item[0] else 0.0, item[4], item[1], item[2],
-                    item[1] - (w / 2 + ox), item[2] - (h / 2 + oy))
-               for k, item in enumerate(srt)]
-        print(f"  [判环] 数字识别不全({len(known)}/3), 按 x 排序兜底: 左→右=1,2,3")
     if not out and digit is None:
         _dump_miss(frame, "ring")
     return out
