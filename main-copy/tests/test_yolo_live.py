@@ -145,6 +145,55 @@ def hstack_same_h(left, right):
     return cv2.hconcat([rs(left), rs(right)])
 
 
+def stack_mode(args):
+    """码垛检测单画面: 末端相机实时, 按 dx 排序打三色(左/中/右=位1/2/3)——
+    mission.stack_rings 的视觉判位口径同款(画面 x 排序), 验证"环上物料颜色识别"。
+    终端持续打印 + 网页面板同步(如已开), q/Ctrl+C 退出。"""
+    import time
+
+    import config as C
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
+    from vision import finder
+
+    cam = Camera(args.cam_end, "yolo_live/stack")
+    cam.open()
+    print(f"加载物料引擎 {args.model_material} ...")
+    backend = YOLOBackend(args.model_material)
+    print("== 码垛检测模式: 末端相机实时, 按 dx 排序=位1(左)/2(中)/3(右) ==")
+    print("持续打印三色; q 或 Ctrl+C 退出")
+    last_log = 0.0
+    while True:
+        frame = cam.read_latest()
+        if frame is None:
+            continue
+        mats = finder.find_materials(backend, frame, conf=args.conf,
+                                     px_per_mm=C.PX_PER_MM)
+        mats.sort(key=lambda m: m.dx)   # 画面左→右
+        named = [m.color for m in mats[:3]]
+        if time.time() - last_log >= 0.5 and mats:
+            last_log = time.time()
+            parts = [f"位{i+1}({m.color},{m.conf:.2f})"
+                     for i, m in enumerate(mats[:3])]
+            print(f"  检出{len(mats)}: " + "  ".join(parts))
+        disp = frame.copy()
+        import cv2
+        for i, m in enumerate(mats[:3], 1):
+            bx1, by1, bx2, by2 = map(int, m.box)
+            color = finder.BOX_BGR.get(m.color, (255, 255, 255))
+            cv2.rectangle(disp, (bx1, by1), (bx2, by2), color, 3)
+            cv2.putText(disp, f"pos{i}:{m.color} {m.conf:.2f}",
+                        (bx1, max(16, by1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.putText(disp, f"colors: {named}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+        cv2.imshow("stack_mode", disp)
+        if cv2.waitKey(30) & 0xFF == ord("q"):
+            break
+    cam.close()
+    cv2.destroyAllWindows()
+
+
 def main():
     ap = argparse.ArgumentParser(description="YOLO 双画面测试台(末端物料+前视障碍)")
     ap.add_argument("--cam-end", default=C.CAMERA_ID_END)
@@ -154,7 +203,18 @@ def main():
     ap.add_argument("--model-obstacle", default=C.MODEL_PATH_OBSTACLE,
                     help="障碍引擎(默认 obstacle-best.engine)")
     ap.add_argument("--conf", type=float, default=0.5)
+    ap.add_argument("--stack", action="store_true",
+                    help="码垛单画面模式: 只开末端相机, 按 dx 排序打三色(左/中/右)")
     args = ap.parse_args()
+
+    if args.stack:
+        stack_mode(args)
+        return
+
+    import time
+
+    from vision.camera import Camera
+    from vision.detect import YOLOBackend
 
     import time
 
