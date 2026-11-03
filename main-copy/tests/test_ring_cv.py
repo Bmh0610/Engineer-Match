@@ -44,6 +44,20 @@ def draw(frame, results, show_all=False, all_ellipses=None):
         if box:
             cv2.rectangle(disp, box[:2],
                           (box[0] + box[2], box[1] + box[3]), (255, 0, 0), 1)
+    # 相机中心(蓝十字, 纠偏基准=画面中心) ↔ 圆环中心(红叉): 连线+纠偏修正量
+    ch_x, ch_y = disp.shape[1] // 2, disp.shape[0] // 2
+    cv2.drawMarker(disp, (ch_x, ch_y), (255, 0, 0), cv2.MARKER_CROSS, 26, 2)
+    cv2.putText(disp, "camera center", (ch_x + 10, ch_y - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+    a, b, cc, d = C.IMG2BODY_RING
+    for digit, cx, cy, outer, box, conf in results:
+        dx, dy = cx - ch_x, cy - ch_y
+        cv2.line(disp, (ch_x, ch_y), (int(cx), int(cy)), (0, 255, 255), 1)
+        dy_right = a * dx + b * dy
+        dx_fwd = cc * dx + d * dy
+        cv2.putText(disp, f"右{dy_right:+.1f} 前{dx_fwd:+.1f}mm",
+                    (int(cx) - 50, int(cy) + int(outer[1] / 2) + 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     return disp
 
 
