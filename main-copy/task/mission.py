@@ -134,17 +134,17 @@ def find_material_fn(backend):
     return find
 
 
-def find_ring_mid_fn(backend):
+def find_ring_mid_fn():
     """中环检测闭包: 离画面中心最近的数字环(建锚用; 仅环空数字可见时可靠)。"""
     from task.ring import find_rings
 
     def find(f):
-        rings = find_rings(backend, f)
+        rings = find_rings(f)
         return min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2) if rings else None
     return find
 
 
-def seek_mid_ring(lk, cam, backend, timeout):
+def seek_mid_ring(lk, cam, timeout):
     """纠偏前判环找中环: 对准 1 号环 y-RING_SEEK_STEP、3 号 y+RING_SEEK_STEP,
     直到对准 2 号环再纠偏; 未见环直接纠偏兜底。仅放环开场(环空数字可见)用;
     码垛段数字被批1物料挡, 不做判环(直接对物料纠偏)。"""
@@ -162,13 +162,11 @@ def seek_mid_ring(lk, cam, backend, timeout):
                 t_line = time.time()
             time.sleep(0.2)
             continue
-        rings = find_rings(backend, f)
+        rings = find_rings(f)
         now = time.time()
-        if now - t_line >= 1.0:   # 每秒诊断行(与 test_ring_diagnose 同款)
-            raw = backend.infer(f)
+        if now - t_line >= 1.0:   # 每秒诊断行
             seg = [f"{r.digit}号({r.cx / f.shape[1]:.2f})" for r in rings]
-            raws = " ".join(f"cls{d.cls_id}:{d.conf:.2f}" for d in raw[:5])
-            print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'} | 原始: {raws or '(空)'}")
+            print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'}")
             t_line = now
         if not rings:
             time.sleep(0.2)
@@ -228,15 +226,15 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
 
 # ---- 动作组②③: 放环 + 抓环 ----
 
-def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
+def place_rings(lk, cam, rings, timeout, mode="rough", colors=None):
     """放环(组1): 回复位→判环找中环→对中环纠偏建锚→逐轮发。
     mode='rough': (1, rings[i], 盘格i) 按任务码环号序(粗加工区, G2/G4);
     mode='buffer': (1, i, i) 恒等正序(暂存区第一圈, 零账本)。返回 (ok, total)。"""
     from vision import finder
     print(f"\n===== 放环 ({'粗加工区' if mode == 'rough' else '暂存区'}) =====")
     arm_move(lk, C.RESET, "回复位")
-    seek_mid_ring(lk, cam, backend, timeout)
-    align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
+    seek_mid_ring(lk, cam, timeout)
+    align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
           "对中环纠偏(建锚)", timeout, auto=True)
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]

@@ -191,15 +191,15 @@ def find_material_fn(backend, color=None):
     return find
 
 
-def find_ring_mid_fn(backend):
+def find_ring_mid_fn():
     """中环=离画面中心最近的数字环(建锚用; 建锚时环空数字可见)。"""
     def find(f):
-        rings = find_rings(backend, f)
+        rings = find_rings(f)
         return min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2) if rings else None
     return find
 
 
-def _seek_mid_ring(lk, cam, backend, timeout):
+def _seek_mid_ring(lk, cam, timeout):
     """纠偏前判环找中环: 相机对着几号环, 1号(左)→y-80mm, 3号(右)→y+80mm,
     直到对准2号环(中环)再纠偏; 未见环直接交给纠偏兜底。放环开场环空数字可见。
     机械臂不在车中心, 到环区可能对着侧环——每次纠偏前判环纠正(用户 2026-10-27)。"""
@@ -210,7 +210,7 @@ def _seek_mid_ring(lk, cam, backend, timeout):
         if f is None:
             time.sleep(0.2)
             continue
-        rings = find_rings(backend, f)
+        rings = find_rings(f)
         if not rings:
             time.sleep(0.2)
             continue
@@ -350,13 +350,13 @@ def _recheck(lk, cam, backend, timeout):
     _LEDGER.zero()
 
 
-def action_place_rings(lk, cam, backend, task, timeout):
+def action_place_rings(lk, cam, task, timeout):
     """放环×3轮: 对中环纠偏建锚(唯一底盘动作) → 环号定槽位(左1/中2/右3,
     圆环从左到右=1,2,3) → 臂回转查表放置(全连续, 无底盘/无回中/无数字识别)。"""
     print("\n===== 动作组②: 放环 (臂回转查表: 左1/中2/右3) =====")
     arm(lk, "回复位", C.RESET, auto=True)
-    _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
-    _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
+    _seek_mid_ring(lk, cam, timeout)   # 判环: 非2号沿y±80找中环
+    _align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout, auto=True)
     _LEDGER.zero()
     for i, (color, ring_no) in enumerate(
@@ -470,7 +470,7 @@ def main():
     if args.skip_to in ("start", "rough"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        action_place_rings(lk, cam, backend, task, args.timeout)
+        action_place_rings(lk, cam, task, args.timeout)
         action_grab_rings(lk, task)
         leg_move(lk, 0, 820, 0, "前进820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
@@ -478,7 +478,7 @@ def main():
     if args.skip_to in ("start", "rough", "buffer"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        action_place_rings(lk, cam, backend, task, args.timeout)
+        action_place_rings(lk, cam, task, args.timeout)
         action_grab_rings(lk, task)
     if args.skip_to in ("start", "rough", "buffer", "home"):
         leg_move(lk, 0, 850, 0, "前进850")

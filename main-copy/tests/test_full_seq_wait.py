@@ -127,15 +127,15 @@ def find_material_fn(backend):
     return find
 
 
-def find_ring_mid_fn(backend):
+def find_ring_mid_fn():
     """中环=离画面中心最近的数字环(建锚用; 建锚时环空数字可见)。"""
     def find(f):
-        rings = find_rings(backend, f)
+        rings = find_rings(f)
         return min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2) if rings else None
     return find
 
 
-def _seek_mid_ring(lk, cam, backend, timeout):
+def _seek_mid_ring(lk, cam, timeout):
     """纠偏前判环找中环: 相机对着几号环, 1号(左)→y-80mm, 3号(右)→y+80mm,
     直到对准2号环(中环)再纠偏; 未见环直接交给纠偏兜底。放环开场环空数字可见。
     机械臂不在车中心, 到环区可能对着侧环——每次纠偏前判环纠正(用户 2026-10-27)。"""
@@ -152,13 +152,11 @@ def _seek_mid_ring(lk, cam, backend, timeout):
                 t_line = time.time()
             time.sleep(0.2)
             continue
-        rings = find_rings(backend, f)
+        rings = find_rings(f)
         now = time.time()
-        if now - t_line >= 1.0:   # 每秒诊断行(与 test_ring_diagnose 同款)
-            raw = backend.infer(f)
+        if now - t_line >= 1.0:   # 每秒诊断行
             seg = [f"{r.digit}号({r.cx / f.shape[1]:.2f})" for r in rings]
-            raws = " ".join(f"cls{d.cls_id}:{d.conf:.2f}" for d in raw[:5])
-            print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'} | 原始: {raws or '(空)'}")
+            print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'}")
             t_line = now
         if not rings:
             time.sleep(0.2)
@@ -221,15 +219,15 @@ def action_grab_materials(lk, cam, backend, task, wait):
 
 # ---- 动作组②: 放环(盘→环, MODE5 组1: 车→地面) ----
 
-def action_place_rings(lk, cam, backend, task, timeout, mode="rough"):
+def action_place_rings(lk, cam, task, timeout, mode="rough"):
     """放环×3轮: 判环找中环+对中环纠偏建锚(唯一底盘动作) → MODE5 组1(车→地面)。
     rough(粗加工区): (1, rings[i], 盘格i) 按任务码环号序; buffer(暂存区, 第一圈):
     (1, i, i) 恒等正序——抓环恒等后盘格i=环i的料, 恰满足 G2 两区同位(零账本)。"""
     print(f"\n===== 动作组②: 放环 (MODE5 组1: 车→地面, "
           f"{'任务码环号序' if mode == 'rough' else '恒等'}) =====")
     arm(lk, "回复位", C.RESET)
-    _seek_mid_ring(lk, cam, backend, timeout)   # 判环: 非2号沿y±80找中环
-    _align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
+    _seek_mid_ring(lk, cam, timeout)   # 判环: 非2号沿y±80找中环
+    _align(lk, cam, find_ring_mid_fn(), C.IMG2BODY_RING,
            "对中环纠偏(建锚)", timeout)
     rings = task["batch1_rings"]
     if mode == "rough":
@@ -281,8 +279,6 @@ def main():
     ap = argparse.ArgumentParser(description="整场流程联调·守株待兔抓取版")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
-    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
-                    help="环检测引擎(默认=原统一 best.engine——用户定: 圆环用原权重)")
     ap.add_argument("--skip-to", choices=("start", "rough", "buffer", "home"),
                     default="start",
                     help="start=全流程(默认); rough/buffer=从该区动作组起跑"
@@ -304,9 +300,8 @@ def main():
     scan_cam.open()
     cam = Camera(C.CAMERA_ID_END, "end")          # 末端相机: 守株等色/纠偏/判环
     cam.open()
-    print(f"加载物料模型 {args.model} / 环模型 {args.model_ring} ...")
+    print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
     backend = YOLOBackend(args.model)           # 物料(wuliao 引擎)
-    backend_ring = YOLOBackend(args.model_ring)  # 圆环(原统一 best.engine)
     lk = Link(args.port)
     print(f"口径: 观察{C.OBSERVE} 复位{C.RESET} 最大伸{C.ARM_REACH_MAX} "
           f"行距{C.TURN_STEP_MM} 放/抓环高{C.H_PLACE_RING}/{C.H_GRAB_RING} "
@@ -330,7 +325,7 @@ def main():
     if args.skip_to in ("start", "rough"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        action_place_rings(lk, cam, backend_ring, task, args.timeout)
+        action_place_rings(lk, cam, task, args.timeout)
         action_grab_rings(lk, task, args.timeout)
         leg_move(lk, 0, -820, 0, "后退820")
         leg_move(lk, 0, 0, -90, "顺时针转90")
@@ -338,7 +333,7 @@ def main():
     if args.skip_to in ("start", "rough", "buffer"):
         if task is None:
             task = parse_task(C.DEFAULT_TASK_CODE)
-        action_place_rings(lk, cam, backend_ring, task, args.timeout)
+        action_place_rings(lk, cam, task, args.timeout)
         action_grab_rings(lk, task, args.timeout)
     if args.skip_to in ("start", "rough", "buffer", "home"):
         leg_move(lk, 0, -850, 0, "后退850")

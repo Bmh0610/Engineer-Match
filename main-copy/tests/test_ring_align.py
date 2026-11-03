@@ -27,18 +27,15 @@ from vision.qr import parse_task  # noqa: E402
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="环纠偏手动测试(协议式命令回传)")
-    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING)
     ap.add_argument("--code", default=C.DEFAULT_TASK_CODE, help="任务码(打印放置环号)")
     ap.add_argument("--timeout", type=float, default=5.0, help="单轮等稳定帧超时(秒)")
     args = ap.parse_args()
 
     from vision.camera import Camera
-    from vision.detect import YOLOBackend
 
     cam = Camera(C.CAMERA_ID_END, "end")
     cam.open()
-    print(f"加载环模型 {args.model_ring} ...")
-    sp = StepRing(None, cam, YOLOBackend(args.model_ring))   # 手动发帧: 不接串口
+    sp = StepRing(None, cam)   # 手动发帧: 不接串口; 环检测=OpenCV ring_cv(无模型)
     if not sp._calib_check():
         return
     task = parse_task(args.code)

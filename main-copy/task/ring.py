@@ -1,12 +1,13 @@
 """Step_Ring: 载物盘 → 粗加工区数字环放置(定一式: 对画面中间的环整车纠偏, 查表放三)。
 
 独立于 grab.py: 自带通信原语与环检测前端(不 import 物料检测/解码代码)——
-环模型可单独重训(MODEL_PATH_RING/RING_CLS 进 config, 拆分后只改那两行);
+环检测=OpenCV(vision/ring_cv.py: 黑线同心圆环+中心数字模板匹配+排列恢复,
+无需模型/权重; YOLO 环检测已退役 2026-11-02);
 转盘标定(IMG2BODY/PX_PER_MM)与环面标定(IMG2BODY_RING/PX_PER_MM_RING)严格
 分开: 环纠偏只用 *_RING, 未填即拒跑(无回退, 防两套标定互相污染)。
 
 流程(车到粗加工区, 臂在复位位 OBSERVE=(0,2090,0)):
-  摆环观测位 RING_OBSERVE → YOLO 找数字环 → 取画面 cx 居中者(物理中间环)
+  摆环观测位 RING_OBSERVE → 找数字环 → 取画面 cx 居中者(物理中间环)
   做"定一"目标 → 整车看-动-再看纠偏(骨架同 grab.align: 死区3mm ≤5轮, 超时
   带误差继续) → 收敛帧数字→左中右位置映射(未检出数字按默认次序 1,2,3 填空位
   +告警) → 任务码颜色序: 盘上取料 → 对应位置示教位姿 RING_SLOT_L/M/R 放置
@@ -21,13 +22,14 @@ from dataclasses import dataclass
 import config as C
 from communication.protocol import Mode
 from vision.finder import find_stable
+from vision.ring_cv import find as _cv_find
 
 _DEFAULT_ORDER = (1, 2, 3)   # 未检出数字的默认次序(用户口径"未检出默认123")
 
 
 @dataclass
 class Ring:
-    digit: int           # 1/2/3(=贴纸数字, 由 RING_CLS 类别映射)
+    digit: int           # 1/2/3(=贴纸数字, 由中心数字识别/排列恢复)
     conf: float
     box: tuple
     cx: float
@@ -36,29 +38,15 @@ class Ring:
     dy: float
 
 
-def find_rings(backend, frame, conf=None):
+def find_rings(frame):
     """一帧 → 数字环列表(Ring: digit 1/2/3, 位置=画面中心偏差 px)。
 
-    检测器由 config.RING_DETECT_YOLO 选择:
-      False(默认)=OpenCV 视觉(vision.ring_cv, 模板匹配+排列恢复; 不需要模型,
-        backend 形参保留兼容、此路径不使用);
-      True=YOLO 环引擎(MODEL_PATH_RING/best.engine, backend 必传)。"""
+    检测器=OpenCV(vision.ring_cv): 黑线同心圆环 → 中心数字模板匹配 + 三环排列恢复;
+    无需模型/权重(YOLO 环检测已退役, 2026-11-02 用户定)。"""
     h, w = frame.shape[:2]
-    if not C.RING_DETECT_YOLO:
-        from vision.ring_cv import find as _cv_find
-        out = []
-        for digit_s, cx, cy, _outer, box, conf_v in _cv_find(frame):
-            out.append(Ring(int(digit_s), conf_v, box, cx, cy,
-                            cx - w / 2, cy - h / 2))
-        return out
-    conf = C.RING_CONF if conf is None else conf
-    cls2digit = {v: k for k, v in C.RING_CLS.items()}
     out = []
-    for d in backend.infer(frame, classes=list(C.RING_CLS.values())):
-        if d.conf < conf or d.cls_id not in cls2digit:
-            continue
-        cx, cy = (d.xyxy[0] + d.xyxy[2]) / 2, (d.xyxy[1] + d.xyxy[3]) / 2
-        out.append(Ring(cls2digit[d.cls_id], d.conf, d.xyxy, cx, cy,
+    for digit_s, cx, cy, _outer, box, conf_v in _cv_find(frame):
+        out.append(Ring(int(digit_s), conf_v, box, cx, cy,
                         cx - w / 2, cy - h / 2))
     return out
 
@@ -66,8 +54,8 @@ def find_rings(backend, frame, conf=None):
 class StepRing:
     """环放置: 摆观测位 → 对中环整车纠偏(定一) → 数字查位 → 盘→环 放三 → 收臂。"""
 
-    def __init__(self, link, cam, backend):
-        self.lk, self.cam, self.backend = link, cam, backend
+    def __init__(self, link, cam):
+        self.lk, self.cam = link, cam
         self.stats = {"place_ok": 0, "place_total": 3}
 
     # ---- 通信原语(同 grab.py 口径: 单命令在途, 等对应完成码) ----
@@ -120,7 +108,7 @@ class StepRing:
 
     def _ring_observe(self, frame):
         """find_stable 回调: 检环 → 返回 cx 居中者(定一目标, 与数字无关)。"""
-        rings = find_rings(self.backend, frame)
+        rings = find_rings(frame)
         if not rings:
             return None
         return min(rings, key=lambda r: abs(r.cx - frame.shape[1] / 2))
@@ -161,7 +149,7 @@ class StepRing:
         中心为 M 基准, 半间距阈值 RING_PITCH_PX/2 —— 与"定一对中间环"同先验);
         未检出数字按默认次序(1,2,3)从左到右填空位+告警(用户口径"未检出默认123")。"""
         pos = {}
-        for r in find_rings(self.backend, frame):
+        for r in find_rings(frame):
             pos[r.digit] = ("L" if r.dx < -C.RING_PITCH_PX / 2
                             else "R" if r.dx > C.RING_PITCH_PX / 2 else "M")
         rest = [d for d in _DEFAULT_ORDER if d not in pos]
@@ -224,7 +212,7 @@ class StepRing:
         counter = [0]
         done = []
         for color, ring_no in order:
-            if ring_no not in C.RING_CLS:
+            if ring_no not in (1, 2, 3):
                 print(f"  !! 环号 {ring_no} 超出 1~3(模型与默认次序均不含), 该颗跳过")
                 continue
             carrier = carrier_of[color].pop(0)

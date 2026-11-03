@@ -6,8 +6,8 @@
 State 模式(gcxl 同款)。臂动作全走 task/mission.py(MODE5: 上位机只发组号+位号,
 成套动作下位机执行, 等 0x0015); 底盘全走 NavDriver 节点式导航(goto/封边重规划)。
 节点(map.yaml): 1/3=启停区 2=扫码位 6=物料盘 4=粗加工区 8=暂存区。
-视觉引擎分工: 物料/码垛判色=wuliao(MODEL_PATH), 圆环检测=原统一 best.engine
-(MODEL_PATH_RING——用户定: 圆环用原权重), 避障=obstacle(MODEL_PATH_OBSTACLE)。
+视觉引擎分工: 物料/码垛判色=wuliao(MODEL_PATH), 避障=obstacle(MODEL_PATH_OBSTACLE);
+圆环检测=OpenCV(vision/ring_cv, 无模型——YOLO 环检测已退役)。
 
 用法:
   实车:   python3 main.py --skip-start     # 电控 0x2201/0x2202 未实现时默认直跑
@@ -126,7 +126,7 @@ class Step3_Leg1Rough(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_ROUGH, "粗加工区")
-        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
+        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam,
                                 ctx.task["batch1_rings"], C.ACTION_TIMEOUT, mode="rough")
         ok2, t2 = M.grab_rings(ctx.lk, ctx.task["batch1_rings"], C.ACTION_TIMEOUT)
         ctx.stats += [("批1放环", ok1, t1), ("批1抓环", ok2, t2)]
@@ -138,7 +138,7 @@ class Step4_Leg1Buffer(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_BUFFER, "暂存区")
-        ok, tot = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
+        ok, tot = M.place_rings(ctx.lk, ctx.end_cam,
                                 ctx.task["batch1_rings"], C.ACTION_TIMEOUT, mode="buffer")
         ctx.stats.append(("批1暂存区放环", ok, tot))
         ctx.current_state = Step5_Leg2Grab()
@@ -160,7 +160,7 @@ class Step6_Leg2Rough(State):
 
     def execute(self, ctx):
         _goto(ctx, NODE_ROUGH, "粗加工区")
-        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam, ctx.backend_ring,
+        ok1, t1 = M.place_rings(ctx.lk, ctx.end_cam,
                                 ctx.task["batch2_rings"], C.ACTION_TIMEOUT, mode="rough")
         ok2, t2 = M.grab_rings(ctx.lk, ctx.task["batch2_rings"], C.ACTION_TIMEOUT)
         ctx.stats += [("批2放环", ok1, t1), ("批2抓环", ok2, t2)]
@@ -200,12 +200,11 @@ class Context:
             "rough2": Step6_Leg2Rough, "stack": Step7_Leg2Stack,
             "home": Step8_ReturnHome}
 
-    def __init__(self, lk, scanner, scan_cam, end_cam, backend, backend_ring,
+    def __init__(self, lk, scanner, scan_cam, end_cam, backend,
                  watcher, skip_start=False, start_node=None, grab_wait=60.0,
                  no_vision=False, skip_to=None):
         self.lk, self.scanner, self.scan_cam = lk, scanner, scan_cam
         self.end_cam, self.backend = end_cam, backend
-        self.backend_ring = backend_ring   # 圆环检测(原统一 best.engine, place_rings 用)
         self.watcher = watcher          # ObstacleWatcher(前相机+障碍引擎); None=纯跑图
         self.nav = None                 # Step1 构建 NavDriver(须先 launch 再 goto)
         self.skip_start, self.start_node = skip_start, start_node
@@ -233,8 +232,6 @@ def main():
     ap = argparse.ArgumentParser(description="智能搬运主状态机(两圈 MODE5 版)")
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model", default=C.MODEL_PATH)
-    ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
-                    help="圆环检测引擎(=原统一 best.engine——用户定: 圆环用原权重)")
     ap.add_argument("--skip-start", action="store_true",
                     help="跳过一键启动等待(电控 0x2201/0x2202 未实现时用)")
     ap.add_argument("--start-node", type=int, choices=(1, 3), default=None,
@@ -278,12 +275,11 @@ def main():
         watcher = ObstacleWatcher(obstacle_backend, front_cam, calib)
     else:
         print("节点检测已关闭(--no-check): 纯跑图")
-    print(f"加载物料模型 {args.model} / 圆环模型 {args.model_ring} ...")
+    print(f"加载物料模型 {args.model} ...(圆环检测=OpenCV ring_cv, 无模型)")
     backend = YOLOBackend(args.model)              # 物料/码垛判色(wuliao 引擎)
-    backend_ring = YOLOBackend(args.model_ring)    # 圆环检测(原统一 best.engine)
     lk = Link(args.port)
 
-    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend, backend_ring,
+    ctx = Context(lk, QrScanner(), scan_cam, end_cam, backend,
                   watcher, skip_start=args.skip_start, start_node=args.start_node,
                   grab_wait=args.wait, no_vision=args.no_vision,
                   skip_to=args.skip_to)
