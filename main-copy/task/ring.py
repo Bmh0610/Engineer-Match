@@ -23,6 +23,7 @@ import config as C
 from communication.protocol import Mode
 from vision.finder import find_stable
 from vision.ring_cv import find as _cv_find
+from vision.ring_cv import analyze as _cv_analyze
 
 _DEFAULT_ORDER = (1, 2, 3)   # 未检出数字的默认次序(用户口径"未检出默认123")
 
@@ -38,11 +39,27 @@ class Ring:
     dy: float
 
 
+def _dump_miss(frame, tag):
+    """0 检出存证: 现场帧覆盖写 /tmp/ring_miss.jpg + ring_cv 中间统计一行
+    (分辨 没候选(阈值/光照) / 有环被滤(参数) / 有环数字不识(模板))。"""
+    try:
+        import cv2
+        cv2.imwrite("/tmp/ring_miss.jpg", frame)
+        results, _ = _cv_analyze(frame, keep_unknown=True)
+        n_digit = sum(1 for r in results if r[5] is not None)
+        n_unknown = sum(1 for r in results if r[5] is None)
+        print(f"  [判环cv] 存证 /tmp/ring_miss.jpg | 成组{n_digit + n_unknown} "
+              f"(数字{n_digit} 未知{n_unknown}) —— 图有环=参数/光照问题, 无环=视野外")
+    except Exception as e:   # 存证失败不干扰主流程
+        print(f"  [判环cv] 存证失败: {e}")
+
+
 def find_rings(frame, digit=None):
     """一帧 → 数字环列表(Ring: digit 1/2/3, 位置=画面中心偏差 px)。
 
     检测器=OpenCV(vision.ring_cv): 黑线同心圆环 → 中心数字模板匹配 + 排列恢复。
-    digit: 目标环号(1/2/3), None=全部。"""
+    digit: 目标环号(1/2/3), None=全部。0 检出时自动存证 /tmp/ring_miss.jpg
+    + 打印 ring_cv 中间统计(2026-11-04 定案取数)。"""
     h, w = frame.shape[:2]
     ox, oy = C.RING_CAM_CENTER_OFFSET_PX   # 相机中心点偏移(纠偏基准)
     out = []
@@ -55,6 +72,8 @@ def find_rings(frame, digit=None):
             continue
         out.append(Ring(d, conf_v, box, cx, cy,
                         cx - (w / 2 + ox), cy - (h / 2 + oy)))
+    if not out and digit is None:
+        _dump_miss(frame, "ring")
     return out
 
 

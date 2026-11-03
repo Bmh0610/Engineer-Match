@@ -134,6 +134,26 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
         print(f"  [纠偏] 基准补偿: 右{offset[0]:+.1f} 前{offset[1]:+.1f}mm")
 
 
+def _last_frame(cam):
+    """取一帧用于存证(读不到返回 None)。"""
+    try:
+        return cam.read_latest(timeout=0.2)
+    except Exception:
+        return None
+
+
+def _dump_miss_frame(frame, path, tag):
+    """0 检出存证: 现场帧覆盖写(失败静默, 不干扰主流程)。"""
+    if frame is None:
+        return
+    try:
+        import cv2
+        cv2.imwrite(path, frame)
+        print(f"  [存证] {tag} 现场帧 → {path}")
+    except Exception:
+        pass
+
+
 def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
     """转盘定一纠偏(2026-11-04 用户定, 三态): 转动中/无料时**不发任何底盘帧**
     (防底盘追着转动的物料跑), 停歇后才看-动-再看。
@@ -157,6 +177,7 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
             backend, f2, conf=0.5, px_per_mm=C.PX_PER_MM)
         if not m1 or not m2:
             print("  [纠偏] 暂未检出物料, 等待(不发帧)...")
+            _dump_miss_frame(f1, "/tmp/mat_miss.jpg", "物料定一")
             time.sleep(0.3)
             continue
         # 停歇判定: 帧1每颗到帧2最近颗距离全部 ≤ 阈值(不跟踪单颗, 防最底下转圈跳变)
@@ -298,6 +319,7 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
                                          exclude=grabbed | skip)
         if mat is None:
             print(f"  !! {wait:.0f}s 未等到新色稳定进窗, 剩余色跳过(保完赛, 盘格空置)")
+            _dump_miss_frame(_last_frame(cam), "/tmp/mat_miss.jpg", "等色超时")
             break
         if mat.color not in order:
             print(f"  !! 检出 {mat.color} 不在任务码色序(识别存疑), 本次不再处理该色")
