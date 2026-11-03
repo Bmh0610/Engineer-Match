@@ -1,6 +1,7 @@
 """整场流程联调·守株待兔抓取版(2026-10-27): 与 test_full_seq.py 唯一区别=抓料换笨办法。
 
-抓料(对号入座, 2026-11-03 定): 定一纠偏(复位位, 建锚)之后车一动不动, 臂停复位位
+抓料(对号入座, 2026-11-03 定): 定一纠偏(复位位, 建锚; 2026-11-04 三态——转盘
+转动中暂停不发帧/停歇后框内优先选料, 防底盘追物料)之后车一动不动, 臂停复位位
 盯夹爪正下方——**任意色**进抓取窗(GRAB_WINDOW)且连帧稳定(转盘停歇,
 finder.wait_any_color)即抓, 盘格=该色在任务码色序中的位次(色 c 第 k 位→盘格 k,
 如 213: 检出红→盘2、黄→盘1、蓝→盘3) → 发 MODE5 组2 → 等 0x0015(35s)。
@@ -242,8 +243,8 @@ def action_grab_materials(lk, cam, backend, task, wait, colors=None):
     → MODE5 组2 (2, 2, k)。识别失败的料不抓等下轮, 单窗超时剩余色跳过(保完赛)。"""
     print("\n===== 动作组①: 抓料 (守株·对号入座: 任意色停歇即抓, 车全程不动) =====")
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
-    _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
-           "定一纠偏(建锚)", wait)
+    import task.mission as M
+    M.align_material_turntable(lk, cam, backend, wait)   # 三态: 转动暂停/停歇框内优先
     order = list(colors or task["batch1_colors"])
     grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
     skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)

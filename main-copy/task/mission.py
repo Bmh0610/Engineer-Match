@@ -1,7 +1,8 @@
 """MODE5 成套动作业务库(2026-11-02 用户定稿口径): 抓料/放环/抓环/码垛 + 判环纠偏。
 
 口径(456+321 例, 详见 tests/test_arm_seq.py docstring 验算表):
-- 抓料(组2): 守株待兔·对号入座(2026-11-03 定)——臂缩回复位→定一纠偏建锚→车全程
+- 抓料(组2): 守株待兔·对号入座(2026-11-03 定)——臂缩回复位→定一纠偏
+  (align_material_turntable: 转动中暂停不发帧/停歇后框内优先选料, 2026-11-04)→车全程
   不动, **任意色**进窗+停歇稳定即发 (2, 2, k); Y=2 恒定=取料工位, Z=k=该色在
   任务码色序中的位次(识别对=色必落自己的位次格, 顺序账自动成立)。批1/批2 复用。
 - 放环(组1): 臂回复位→判环找中环→对中环纠偏建锚(唯一底盘动作), 然后逐轮发:
@@ -131,6 +132,67 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
     if offset[0] or offset[1]:
         _send_move_v(lk, offset[0], offset[1])
         print(f"  [纠偏] 基准补偿: 右{offset[0]:+.1f} 前{offset[1]:+.1f}mm")
+
+
+def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
+    """转盘定一纠偏(2026-11-04 用户定, 三态): 转动中/无料时**不发任何底盘帧**
+    (防底盘追着转动的物料跑), 停歇后才看-动-再看。
+    目标选择: ALIGN_BOX 框内离画面中心最近的物料优先(对中后恰在抓取窗, 守株
+    立即可抓); 框内无料 → 画面最底下物料(离车最近, 对中后进框)。
+    0 颗不放弃(转动中模糊会瞬时闪失, 总超时兜底)。终态口径不变=物料对画面中心
+    (下位机抓取点示教依据)。offset 同 align()——纠偏结束后补走固定基准补偿。"""
+    from vision import finder
+    deadline = time.time() + timeout
+    x0, x1, y0, y1 = C.ALIGN_BOX
+    round_no = 0
+    while time.time() < deadline:
+        f1 = cam.read_latest(timeout=0.2)
+        m1 = [] if f1 is None else finder.find_materials(
+            backend, f1, conf=0.5, px_per_mm=C.PX_PER_MM)
+        f2 = cam.read_latest(timeout=0.2)
+        m2 = [] if f2 is None else finder.find_materials(
+            backend, f2, conf=0.5, px_per_mm=C.PX_PER_MM)
+        if not m1 or not m2:
+            print("  [纠偏] 暂未检出物料, 等待(不发帧)...")
+            time.sleep(0.3)
+            continue
+        # 停歇判定: 帧1每颗到帧2最近颗距离全部 ≤ 阈值(不跟踪单颗, 防最底下转圈跳变)
+        tol = C.STABLE_TOL_PX * 2
+        pairs = [min(math.hypot(a.cx - b.cx, a.cy - b.cy) for b in m2) for a in m1]
+        if max(pairs) > tol:
+            print(f"  [纠偏] 转盘转动中, 暂停纠偏(不发帧, 最大位移 {max(pairs):.0f}px)")
+            time.sleep(0.3)
+            continue
+        # 停歇: 目标=框内离画面中心最近, 无则画面最底下(cy 最大)
+        h, w = f1.shape[:2]
+        in_box = [m for m in m1
+                  if x0 * w <= m.cx <= x1 * w and y0 * h <= m.cy <= y1 * h]
+        if in_box:
+            tgt = min(in_box, key=lambda m: m.dx ** 2 + m.dy ** 2)
+            src_tag = "框内"
+        else:
+            tgt = max(m1, key=lambda m: m.cy)
+            src_tag = "最底下"
+        round_no += 1
+        a, b, c, d = C.IMG2BODY
+        dy_right = a * tgt.dx + b * tgt.dy
+        dx_fwd = c * tgt.dx + d * tgt.dy
+        residual = math.hypot(dx_fwd, dy_right)
+        if residual <= C.ALIGN_TOL_MM:
+            print(f"  ✓ 定一纠偏结束 ({src_tag}料, 残差 {residual:.1f}mm, {round_no} 轮)")
+            if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
+                print(f"  [纠偏] 补基准补偿 前{offset[1]:+.1f} 右{offset[0]:+.1f}")
+                _send_move_v(lk, offset[0], offset[1])
+            return
+        if time.time() > deadline:
+            break
+        print(f"  [纠偏] 第{round_no}轮({src_tag}料): 前{dx_fwd:+.1f} 右{dy_right:+.1f} "
+              f"(残差 {residual:.1f}mm)")
+        _send_move_v(lk, dy_right, dx_fwd)
+        time.sleep(C.ALIGN_SETTLE)
+    print("  [纠偏] 超时, 带误差继续(保完赛)")
+    if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
+        _send_move_v(lk, offset[0], offset[1])
 
 
 def find_material_fn(backend):
