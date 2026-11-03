@@ -95,7 +95,7 @@ def _send_move_v(lk, dy_right, dx_fwd):
 
 
 def _align(lk, cam, find_fn, matrix, label, timeout):
-    """整车纠偏: 看-动-再看, 死区3mm ≤5轮, 超时带误差继续(保完赛)。
+    """整车纠偏: 看-动-再看, 死区3mm ≤ALIGN_MAX_ITER轮(10), 超时带误差继续(保完赛)。
     无门控全自动(2026-11-03 用户定: 到地方直接纠偏)。"""
     deadline = time.time() + C.ALIGN_TIMEOUT
     for i in range(1, C.ALIGN_MAX_ITER + 1):

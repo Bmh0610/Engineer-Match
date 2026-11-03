@@ -48,7 +48,7 @@ PX_PER_MM = 3.675              # 2026-10-24 标定(转180°重装后新高度): 
 
 # ---- 阶段A 定位纠偏(移植 gcxl adjust_position_to_target 骨架) ----
 ALIGN_TOL_MM = 3.0       # 死区: 残差 ≤ 此值收工(gcxl 4px×0.72 同量级)
-ALIGN_MAX_ITER = 5       # 最多几轮 看-动-再看
+ALIGN_MAX_ITER = 10      # 最多几轮 看-动-再看(2026-11-03 用户定 5→10)
 ALIGN_TIMEOUT = 30.0     # 总超时(秒), 超时告警继续(保完赛)
 ALIGN_SETTLE = 0.3       # 每轮 move_v 后等车沉降再取帧
 STABLE_FRAMES = 2        # 连续 N 帧中心位移 < STABLE_TOL_PX 才采用(滤框抖)
