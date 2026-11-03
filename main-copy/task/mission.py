@@ -284,8 +284,7 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
     from vision import finder
     print(f"\n===== {batch} 抓料 (守株·对号入座: 任意色停歇即抓, Z=色序位) =====")
     arm_move(lk, C.RESET, "缩回复位(定一纠偏位)")
-    align(lk, cam, find_material_fn(backend), C.IMG2BODY,
-          "定一纠偏(建锚)", wait, auto=True)
+    align_material_turntable(lk, cam, backend, wait)   # 三态: 转动暂停/停歇框内优先
     order = list(colors)
     grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
     skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)
