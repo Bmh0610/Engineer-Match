@@ -212,6 +212,12 @@ class Step8_ReturnHome(State):
 
     def execute(self, ctx):
         _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)")
+        # 入库微调(2026-11-05 用户定): 启1 到节点1后不转, 场地系 y-200→x-200
+        # 回摆车位(车头朝西: 场地y-=车右移/场地x-=车前进)。仅全程模式(nav 存在);
+        # 路径 [8,7,6,1] 末边朝西固定, 若因封边改道则朝向不保证——跳过微调防错位。
+        if ctx.start_node == 1 and ctx.nav is not None:
+            ctx.nav._send_move(-200, 0, 0, "入库: 场地y-200(车右移)")
+            ctx.nav._send_move(0, 200, 0, "入库: 场地x-200(车前进)")
         ctx.current_state = Step9_Done()
 
 
