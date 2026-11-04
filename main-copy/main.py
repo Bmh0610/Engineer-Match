@@ -50,13 +50,14 @@ class State:
         raise NotImplementedError
 
 
-def _goto(ctx, node, label):
-    """导航到节点; skip-to 调试时 nav=None(人工摆车)只打印跳过。"""
+def _goto(ctx, node, label, stop_heading=None):
+    """导航到节点; skip-to 调试时 nav=None(人工摆车)只打印跳过。
+    stop_heading 显式传=强制末朝向(覆盖默认恢复发车朝向, 回库入库前提)。"""
     if ctx.nav is None:
         print(f"== [skip-to] 人工摆车, 跳过导航 → {label} (节点{node}) ==")
         return
     print(f"== 导航 → {label} (节点{node}) ==")
-    ctx.nav.goto(node)
+    ctx.nav.goto(node, stop_heading=stop_heading)
 
 
 class Step0_WaitStart(State):
@@ -211,13 +212,18 @@ class Step8_ReturnHome(State):
     """回启停区: goto 出发节点(启1=1 / 启2=3)。"""
 
     def execute(self, ctx):
-        _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)")
-        # 入库微调(2026-11-05 用户定): 启1 到节点1后不转, 场地系 y-200→x-200
-        # 回摆车位(车头朝西: 场地y-=车右移/场地x-=车前进)。仅全程模式(nav 存在);
-        # 路径 [8,7,6,1] 末边朝西固定, 若因封边改道则朝向不保证——跳过微调防错位。
-        if ctx.start_node == 1 and ctx.nav is not None:
-            ctx.nav._send_move(-200, 0, 0, "入库: 场地y-200(车右移)")
-            ctx.nav._send_move(0, 200, 0, "入库: 场地x-200(车前进)")
+        # 启1: 强制末朝向朝西(2026-11-05 用户定: 到节点1不转直接入库,
+        # 入库两腿的前提=车头朝西, 覆盖默认恢复发车朝向); 启2 保持默认(朝南)。
+        west = -math.pi / 2
+        if ctx.start_node == 1:
+            _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)",
+                  stop_heading=west)
+            # 入库微调: 车头朝西(不转), 场地系 y-200→x-200 回摆车位
+            if ctx.nav is not None:
+                ctx.nav._send_move(-200, 0, 0, "入库: 场地y-200(车右移)")
+                ctx.nav._send_move(0, 200, 0, "入库: 场地x-200(车前进)")
+        else:
+            _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)")
         ctx.current_state = Step9_Done()
 
 
