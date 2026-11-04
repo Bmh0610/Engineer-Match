@@ -56,7 +56,7 @@ WORK_HEADING = {6: 0.0, 4: math.pi, 8: math.pi / 2, 2: math.pi / 2}
 # 接近转盘/环区(麦轮工作区对位微调, 非车道行驶——"头冲前"纪律只管跑图), 图外不入图;
 # 工作组完成后沿 x- 等量退回节点位、之后才转向下一段(否则转向中心偏离车道节点)。
 # 物料盘(6)=100mm; 其余工作点缺省不进给, 要加只填数。
-WORK_APPROACH_MM = {6: 100.0}
+WORK_APPROACH_MM = {6: 50.0}   # 2026-11-05 用户定 100→50(方向不变, x+ 臂侧横移)
 
 
 def turn_z(target_h, heading, rotation_sign):
