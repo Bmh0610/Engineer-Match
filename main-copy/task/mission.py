@@ -416,8 +416,9 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
     for y, z in seq:
         if run_action(lk, 1, y, z, timeout):
             ok += 1
-    _send_move_v(lk, 0, -30)   # 2026-11-05 用户定: 圆环放完 y−30 回节点位
-    print("  · 放环后 y-30 回节点位")
+    if mode == "buffer":   # 2026-11-05 用户定: 暂存区放环后回节点位20; 粗区取消
+        _send_move_v(lk, 0, -20)   # (粗区走30会让同区抓环偏30抓空)
+        print("  · 放环后 y-20 回节点位")
     print(f"== 放环完成 ({ok}/{len(seq)}, 车在中环锚点位) ==")
     return ok, len(seq)
 
@@ -425,15 +426,15 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
 def grab_rings(lk, rings, timeout):
     """抓环(组3) 纯记忆正序恒等(2026-11-03 用户定, 原倒序): 放过的环号从小到大
     环 r → 盘格 r——恒等映射与次序无关, 统一取料侧 123 顺序。
-    抓完 y−30 回节点位(2026-11-05 用户定: 圆环抓完同放环)。返回 (ok, total)。"""
+    抓完 y−20 回节点位(2026-11-05 用户定 30→20)。返回 (ok, total)。"""
     print("\n===== 抓环 (纯记忆, 正序恒等: 环r→盘格r) =====")
     order = sorted(set(rings))
     ok = 0
     for r in order:
         if run_action(lk, 3, r, r, timeout):
             ok += 1
-    _send_move_v(lk, 0, -30)   # 2026-11-05 用户定: 圆环抓完 y−30 回节点位
-    print("  · 抓环后 y-30 回节点位")
+    _send_move_v(lk, 0, -20)   # 2026-11-05 用户定 30→20: 抓环后回节点位
+    print("  · 抓环后 y-20 回节点位")
     print(f"== 抓环完成 ({ok}/{len(order)}, 盘格=环号恒等) ==")
     return ok, len(order)
 
