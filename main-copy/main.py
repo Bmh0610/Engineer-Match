@@ -212,18 +212,15 @@ class Step8_ReturnHome(State):
     """回启停区: goto 出发节点(启1=1 / 启2=3)。"""
 
     def execute(self, ctx):
-        # 启1: 强制末朝向朝西(2026-11-05 用户定: 到节点1不转直接入库,
-        # 入库两腿的前提=车头朝西, 覆盖默认恢复发车朝向); 启2 保持默认(朝南)。
+        # 启1/启2 统一强制末朝向朝西(2026-11-05 用户定): 两车回库路径末边都
+        # 自然朝西=零额外转向(恢复发车朝向反而要多转90/180°); 规则不规定回库
+        # 朝向。入库微调(启1): 车头朝西(不转), 场地系 y-200→x-200 回摆车位。
         west = -math.pi / 2
-        if ctx.start_node == 1:
-            _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)",
-                  stop_heading=west)
-            # 入库微调: 车头朝西(不转), 场地系 y-200→x-200 回摆车位
-            if ctx.nav is not None:
-                ctx.nav._send_move(-200, 0, 0, "入库: 场地y-200(车右移)")
-                ctx.nav._send_move(0, 200, 0, "入库: 场地x-200(车前进)")
-        else:
-            _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)")
+        _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)",
+              stop_heading=west)
+        if ctx.start_node == 1 and ctx.nav is not None:
+            ctx.nav._send_move(-200, 0, 0, "入库: 场地y-200(车右移)")
+            ctx.nav._send_move(0, 200, 0, "入库: 场地x-200(车前进)")
         ctx.current_state = Step9_Done()
 
 
