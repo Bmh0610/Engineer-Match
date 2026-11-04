@@ -94,10 +94,14 @@ def _send_move_v(lk, dy_right, dx_fwd):
 
 
 def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
-          offset=(0.0, 0.0)):
+          offset=(0.0, 0.0), phase_switch_mm=None):
     """整车纠偏(圆环区/码垛): 看-动-再看, 死区 ≤ALIGN_TOL_MM_RING(1mm) ≤ALIGN_MAX_ITER 轮, 超时带误差继续(保完赛)。
     auto=True 不弹门控直接跑(建锚用); False 回车触发/s 跳过(人工兜底)。
-    offset=(右,前) mm: 纠偏结束后补走的固定基准补偿(相机基准点漂移, 2026-11-03)。"""
+    offset=(右,前) mm: 纠偏结束后补走的固定基准补偿(相机基准点漂移, 2026-11-03)。
+    phase_switch_mm(2026-11-05 用户定两阶段): 非 None 时粗/精两段——
+      粗段(bbox 中心, 对模糊帧稳)残差 <switch(mm) → 锁存切精段(几何中心),
+      粗段死区=switch(10)、精段死区=ALIGN_TOL_MM_RING(1); 单向不回粗(防两基准
+      差几 px 来回横跳)。对象无 bbox 中心时粗=精(天然退化单阶段)。"""
     if not auto:
         try:
             ans = input(f"\n<- 回车={label}(看-动-再看) / s=跳过: ").strip().lower()
@@ -109,6 +113,7 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
     from vision import finder
     deadline = time.time() + C.ALIGN_TIMEOUT
     done = False
+    phase_fine = False
     for i in range(1, C.ALIGN_MAX_ITER + 1):
         obj, _fr = finder.find_stable(find_fn, cam,
                                       timeout=max(0.5, deadline - time.time()))
@@ -116,16 +121,31 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
             print(f"  [纠偏] 第{i}轮未检出目标, 放弃(保完赛继续)")
             return
         a, b, c, d = matrix
-        dy_right = a * obj.dx + b * obj.dy
-        dx_fwd = c * obj.dx + d * obj.dy
-        residual = math.hypot(dx_fwd, dy_right)
-        if residual <= C.ALIGN_TOL_MM_RING:
-            print(f"  ✓ 纠偏结束 (残差 {residual:.1f}mm, {i} 轮)")
+        has_bbox = phase_switch_mm is not None and getattr(obj, "bbox_cx", None) is not None
+        fine_dx = a * obj.dx + b * obj.dy
+        fine_dy = c * obj.dx + d * obj.dy
+        fine_res = math.hypot(fine_dx, fine_dy)
+        if has_bbox and not phase_fine:
+            cdy = a * obj.bbox_cx + b * obj.bbox_cy
+            cdx = c * obj.bbox_cx + d * obj.bbox_cy
+            cres = math.hypot(cdx, cdy)
+            if cres < phase_switch_mm:
+                phase_fine = True   # 单向锁存切精段
+        if phase_fine or not has_bbox:
+            dy_right, dx_fwd, residual = fine_dx, fine_dy, fine_res
+            tol = C.ALIGN_TOL_MM_RING
+            tag = "精段(几何)"
+        else:
+            dy_right, dx_fwd, residual = cdy, cdx, cres
+            tol = phase_switch_mm
+            tag = "粗段(bbox)"
+        if residual <= tol:
+            print(f"  ✓ 纠偏结束 ({tag}, 残差 {residual:.1f}mm, {i} 轮)")
             done = True
             break
         if time.time() > deadline:
             break
-        print(f"  [纠偏] 第{i}轮: 前{dx_fwd:+.1f} 右{dy_right:+.1f} (残差 {residual:.1f}mm)")
+        print(f"  [纠偏] 第{i}轮[{tag}]: 前{dx_fwd:+.1f} 右{dy_right:+.1f} (残差 {residual:.1f}mm)")
         _send_move_v(lk, dy_right, dx_fwd)
         time.sleep(C.ALIGN_SETTLE)
     print("  纠偏结束(带误差, 保完赛继续)")
@@ -387,7 +407,7 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
     arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
     seek_mid_ring(lk, cam, backend, timeout)
     align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
-          "对中环纠偏(建锚)", timeout, auto=True)
+          "对中环纠偏(建锚)", timeout, auto=True, phase_switch_mm=10.0)
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]
     else:

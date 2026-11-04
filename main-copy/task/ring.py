@@ -36,6 +36,8 @@ class Ring:
     cy: float
     dx: float            # 相对画面中心偏差 px(右+ 下+)
     dy: float
+    bbox_cx: float = 0.0  # YOLO bbox 中心(两阶段纠偏粗段用; 几何中心=cx/cy 精段用)
+    bbox_cy: float = 0.0
 
 
 def _dump_miss(frame, tag):
@@ -103,7 +105,8 @@ def find_rings(frame, digit=None, backend=None):
         if not precise:
             print(f"  [判环] {digit_d} 号环几何降级 bbox 中心")
         out.append(Ring(digit_d, d.conf, d.xyxy, cx, cy,
-                        cx - (w / 2 + ox), cy - (h / 2 + oy)))
+                        cx - (w / 2 + ox), cy - (h / 2 + oy),
+                        bbox_cx=bx_cx - (w / 2 + ox), bbox_cy=bx_cy - (h / 2 + oy)))
     if not out and digit is None:
         # YOLO 全空 → 全画面 ring_cv 几何 + x 排序兜底(身份来自排列, 左1中2右3)
         try:
@@ -115,7 +118,9 @@ def find_rings(frame, digit=None, backend=None):
                 out = [Ring(k + 1, r[7] if r[5] else 0.0,
                             (r[0][0] - 40, r[0][1] - 40, r[0][0] + 40, r[0][1] + 40),
                             r[0][0], r[0][1],
-                            r[0][0] - (w / 2 + ox), r[0][1] - (h / 2 + oy))
+                            r[0][0] - (w / 2 + ox), r[0][1] - (h / 2 + oy),
+                            bbox_cx=r[0][0] - (w / 2 + ox),
+                            bbox_cy=r[0][1] - (h / 2 + oy))
                        for k, r in enumerate(srt)]
                 print(f"  [判环] YOLO 未检出, 全画面几何+x 排序兜底 {len(out)} 环")
         except Exception:
