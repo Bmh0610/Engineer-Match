@@ -1,11 +1,9 @@
 """整场流程联调·守株待兔抓取版(2026-10-27): 与 test_full_seq.py 唯一区别=抓料换笨办法。
 
-抓料(对号入座, 2026-11-03 定): 定一纠偏(复位位, 建锚; 2026-11-04 三态——转盘
-转动中暂停不发帧/停歇后框内优先选料, 防底盘追物料)之后车一动不动, 臂停复位位
-盯夹爪正下方——**任意色**进抓取窗(GRAB_WINDOW)且连帧稳定(转盘停歇,
-finder.wait_any_color)即抓, 盘格=该色在任务码色序中的位次(色 c 第 k 位→盘格 k,
-如 213: 检出红→盘2、黄→盘1、蓝→盘3) → 发 MODE5 组2 → 等 0x0015(35s)。
-不再等特定色顺序, 命中不挑色; 识别失败的料不抓等下轮; 单窗超时剩余色跳过(保完赛)。
+抓料(按任务码顺序逐色等待, 2026-11-05 定——抓取顺序=评分项): 定一纠偏
+(复位位, 建锚)之后车一动不动, 臂停复位位盯夹爪正下方——**任务码第1组顺序**
+的下一色进抓取窗(GRAB_WINDOW)且连帧稳定(转盘停歇, finder.wait_for_color)即抓
+→ 发 MODE5 组2 → 等 0x0015(35s)。单色超时跳过(保完赛)。
 
 其余(腿/扫码/放环 MODE5 组1 车上格z→地面y / 抓环 MODE5 组3 正序恒等 环r→盘格r /
 判环找中环/对中环纠偏建锚)与 test_full_seq.py 完全同款, 全文见那份。
@@ -238,35 +236,25 @@ def run_action(lk, group, outer, car, timeout, gap=0):
 
 
 def action_grab_materials(lk, cam, backend, task, wait, colors=None):
-    """抓料×3轮(守株待兔·对号入座): 定一(复位位, 建锚)后车一动不动——
-    **任意色**进窗+停歇稳定即抓(不等特定色), 盘格=该色在任务码色序中的位次
-    → MODE5 组2 (2, 2, k)。识别失败的料不抓等下轮, 单窗超时剩余色跳过(保完赛)。"""
-    print("\n===== 动作组①: 抓料 (守株·对号入座: 任意色停歇即抓, 车全程不动) =====")
+    """抓料×3轮(守株待兔·按任务码顺序逐色等待, 抓取顺序=评分项):
+    定一(复位位, 建锚)后车一动不动——逐色等**任务码第1组顺序**的目标色进窗+
+    停歇稳定即抓 → MODE5 组2 (2, 2, i)。单色超时跳过(保完赛, 盘格空置)。"""
+    print("\n===== 动作组①: 抓料 (守株: 按任务码顺序逐色等待, 车全程不动) =====")
     arm(lk, "缩回复位(定一纠偏位)", C.RESET)
-    import task.mission as M
-    M.align_material_turntable(lk, cam, backend, wait)   # 三态: 转动暂停/停歇框内优先
-    order = list(colors or task["batch1_colors"])
-    grabbed = set()   # 已处理的色(无论回执成败——超时不重发, 宁可盘格空置不死循环)
-    skip = set()      # 色序外/识别存疑的色, 本次不再处理(防反复检出死循环)
-    while len(grabbed) < len(order):
-        print(f"\n<等任意色进窗+停歇即抓, 色序{order} 已抓{sorted(grabbed)} "
-              f"跳过{sorted(skip)}, ≤{wait:.0f}s>")
-        mat, _fr = finder.wait_any_color(backend, cam, px_per_mm=C.PX_PER_MM,
-                                         timeout=max(0.5, wait),
-                                         exclude=grabbed | skip)
+    _align(lk, cam, find_material_fn(backend), C.IMG2BODY,
+           "定一纠偏(建锚)", wait)
+    for i, color in enumerate(colors or task["batch1_colors"], 1):
+        print(f"\n<等 {color}(第{i}个抓): 转进窗+停歇即发 MODE5, ≤{wait:.0f}s>")
+        mat, _fr = finder.wait_for_color(backend, cam, color,
+                                         px_per_mm=C.PX_PER_MM,
+                                         timeout=max(0.5, wait))
         if mat is None:
-            print(f"  !! {wait:.0f}s 未等到新色稳定进窗, 剩余色跳过(保完赛, 盘格空置)")
-            break
-        if mat.color not in order:
-            print(f"  !! 检出 {mat.color} 不在任务码色序(识别存疑), 本次不再处理该色")
-            skip.add(mat.color)
+            print(f"  !! {wait:.0f}s 未等到 {color}, 跳过该色(保完赛, 盘格空置)")
             continue
-        k = order.index(mat.color) + 1
         a, b, c, d = C.IMG2BODY
         print(f"  ✓ 看到: {mat.color} (偏差 右{a*mat.dx+b*mat.dy:+.1f} "
-              f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 任务码第{k}位 → 组2 放盘格{k}")
-        run_action(lk, 2, 2, k, C.ACTION_TIMEOUT)   # Y=2 取料工位, Z=色序位k
-        grabbed.add(mat.color)   # 成败都记账: 超时重发会让动作再做一遍(文档警告)
+              f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 组2 抓取上盘格{i}")
+        run_action(lk, 2, 2, i, C.ACTION_TIMEOUT)   # Y=2 取料工位, Z=顺序格i
     print("\n== 抓料完成 (车全程在锚点位, 账本为零) ==")
 
 
@@ -408,8 +396,7 @@ def main():
         leg_move(lk, 0, 0, 90, "逆时针转90(机械臂朝物料盘)")
         if display:
             display.set_step("守株抓料(批1)")
-        action_grab_materials(lk, cam, backend, task, args.wait,
-                              colors=task["batch1_colors"])
+        action_grab_materials(lk, cam, backend, task, args.wait)   # G2
         leg_move(lk, 0, 0, 90, "逆时针转90")
         leg_move(lk, 0, 920, 0, "前进920")
         leg_move(lk, 0, 850, 0, "前进850")
@@ -449,8 +436,7 @@ def main():
             leg_move(lk, 0, 0, 90, "逆时针转90(朝东=批1抓料朝向)")
         if display:
             display.set_step("守株抓料(批2)")
-        action_grab_materials(lk, cam, backend, task, args.wait,
-                              colors=task["batch2_colors"])
+        action_grab_materials(lk, cam, backend, task, args.wait, colors=task["batch2_colors"])
         leg_move(lk, 0, 0, 90, "逆时针转90")
         leg_move(lk, 0, 920, 0, "前进920")
         leg_move(lk, 0, 850, 0, "前进850")
