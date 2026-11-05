@@ -184,6 +184,8 @@ def align_angle(lk, cam, centers_fn, timeout, offset=(0.0, 0.0)):
     deadline = time.time() + timeout
     giveup_deadline = time.time() + C.ANGLE_GIVEUP_S
     n_round = 0
+    ok_rounds = 0   # 连续死区轮计数(借鉴开源队 delay_visual 连续收敛判定:
+                    # 防"车身晃动的单帧恰好落进死区"误判提前收敛, 2026-11-05)
     while time.time() < deadline and n_round < C.ALIGN_MAX_ITER:
         f = cam.read_latest(timeout=0.2)
         centers = [] if f is None else centers_fn(f)
@@ -196,18 +198,27 @@ def align_angle(lk, cam, centers_fn, timeout, offset=(0.0, 0.0)):
         ang, res = finder.line_angle_deg(centers)
         if ang is None:
             print(f"  [角度] 三心不共线(残差 {res:.0f}px), 等待重试...")
+            ok_rounds = 0
             time.sleep(0.3)
             continue
         ang = ang * C.ANGLE_SIGN
         if abs(ang) <= C.ANGLE_TOL_DEG:
-            print(f"  ✓ 角度纠偏结束 (倾角 {ang:+.1f}°, {n_round} 轮)")
-            if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
-                _send_move_v(lk, offset[0], offset[1])
-            return
+            ok_rounds += 1
+            if ok_rounds >= C.ANGLE_OK_ROUNDS:
+                print(f"  ✓ 角度纠偏结束 (连续{ok_rounds}轮倾角 {ang:+.1f}°, "
+                      f"转向{n_round}次)")
+                if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
+                    _send_move_v(lk, offset[0], offset[1])
+                return
+            print(f"  [角度] 倾角 {ang:+.1f}° 在死区, 复测 {ok_rounds}/"
+                  f"{C.ANGLE_OK_ROUNDS} 确认...")
+            time.sleep(0.2)
+            continue
+        ok_rounds = 0
         step = max(-C.ANGLE_MAX_STEP, min(C.ANGLE_MAX_STEP, ang)) * C.ANGLE_SIGN
         n_round += 1
         print(f"  [角度] 第{n_round}轮: 连线倾角 {ang:+.1f}° → 转向 {step:+.1f}°")
-        lk.move_v(0, 0, round(step * 10))   # move_v z 单位=度(底盘协议 1°/单位)
+        lk.move_v(0, 0, round(step * 10))
         t0 = time.time()
         while time.time() - t0 < C.CMD_TIMEOUT:
             for f in lk.poll():
