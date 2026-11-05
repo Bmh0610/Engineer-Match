@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=智能搬运主程序
+Comment=开机自动跑 main.py --no-check(停在等一键启动; 包装脚本含设备等待与崩溃自动拉起)
+Exec=/home/popcorn-car/main-copy/tools/autostart/run_paotu.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
