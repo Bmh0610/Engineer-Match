@@ -423,10 +423,14 @@ def seek_mid_ring(lk, cam, backend, timeout):
             print(f"  · 无环, x{C.RING_SEEK_STEP_X:+.0f} 扫描(第{scanned}步)")
             time.sleep(0.3)
             continue
-        hit = min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2)
-        if hit.digit == 2:
-            print("  ✓ 已对准 2 号环(中环), 直接纠偏")
+        # 收敛判定(2026-11-05 用户定): 检出 2 号即收敛——后续对中环纠偏只修
+        # 2 号, 其他环挡在视野不影响; 旧条件"hit(离基准最近)==2"过严:
+        # 2 号在视野但 1 号更近基准时死锁(来回走耗尽限次, 实车暴露)。
+        ring2 = [r for r in rings if r.digit == 2]
+        if ring2:
+            print("  ✓ 检出 2 号环(视野内可纠偏), 停止走动直接纠偏")
             return
+        hit = min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2)
         # ① 方向(2026-11-05 用户更正): 看到 1 号 → y+80; 看到 3 号 → y−80
         dy = C.RING_SEEK_STEP if hit.digit == 1 else -C.RING_SEEK_STEP
         print(f"  · 当前对准 {hit.digit} 号环, 沿 y{dy:+.0f} 找 2 号环")
