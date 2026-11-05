@@ -219,7 +219,7 @@ class Step8_ReturnHome(State):
         _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)",
               stop_heading=west)
         if ctx.start_node == 1 and ctx.nav is not None:
-            ctx.nav._send_move(-200, 0, 0, "入库: 场地y-200(车右移)")
+            ctx.nav._send_move(200, 0, 0, "入库: x+200=车右移200")
             ctx.nav._send_move(0, -200, 0, "入库: 场地x-200(实车方向反了, 用户改: 车后退)")
         ctx.current_state = Step9_Done()
 
