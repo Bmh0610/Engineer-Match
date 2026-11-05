@@ -24,6 +24,7 @@ BASE = str(Path(__file__).resolve().parent.parent)   # main-copy 根(双端通�
 sys.path.insert(0, BASE)
 
 import config as C  # noqa: E402
+from task import mission as M  # noqa: E402   (模块级: run_round 也要用)
 
 
 def digit_map(f, backend):
@@ -62,7 +63,6 @@ def main():
     from communication.protocol import Link
     from vision.camera import Camera
     from vision.detect import YOLOBackend
-    from task import mission as M
 
     cam = Camera(C.CAMERA_ID_END, "end")
     cam.open()
