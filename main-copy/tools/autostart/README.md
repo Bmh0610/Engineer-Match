@@ -19,8 +19,8 @@
 # 看程序跑到哪了
 tail -f ~/main_boot.log
 
-# 停止(调试/手动跑测试前必做——自启实例占着 ttyUSB0)
-touch ~/STOP_PAOTU && pkill -f run_paotu.sh
+# 停止(调试/手动跑测试前必做——自启实例占着 ttyUSB0): 先杀循环再杀主程序
+touch ~/STOP_PAOTU; pkill -f run_paotu.sh; pkill -f "main.py --no-check"
 
 # 恢复自启(下次开机生效)
 rm ~/STOP_PAOTU
@@ -37,5 +37,5 @@ sudo cp /etc/gdm3/custom.conf.bak-paotu /etc/gdm3/custom.conf
 
 - **比赛务必接 HDMI 屏再上电**：无屏时 GNOME 会话可能起不来，自启不生效。
 - 跑的是 `~/main-copy`（逐色等色版主线）；要用复件版改 `run_paotu.sh` 里 `DIR=` 一行。
-- main.py 退出（跑完/崩溃）后 8s 自动重启回到等启动；不想要循环删掉 wrapper 末尾 while。
+- **跑完一遍不再自启**（2026-11-06 用户定）：按退出码区分——rc=0（正常跑完/运行期硬失败）包装脚本直接退出；只有 rc≠0（开机设备未就绪等崩溃）才 8s 后自动重试。开机兜底保留，跑完即歇。
 - ⚠ 固件一键启动(0x2201/0x2202)未上车前，程序会一直停在等启动（属预期）。
