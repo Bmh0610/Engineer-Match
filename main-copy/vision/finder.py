@@ -97,40 +97,6 @@ def refine_material_stages(frame, m, px_per_mm=None):
     return False, stages
 
 
-def line_angle_deg(points, max_res=15.0):
-    """多点最小二乘拟合直线倾角(度)。
-
-    points: [(cx, cy), ...](像素, ≥2 个)。返回 (角度deg, 残差px)——
-    角度=相对画面水平线的倾角(顺时针为正, 图像 y 向下); 残差=各点到拟合线
-    的距离 RMS(共线性度量)。2 点直接连线(残差 0); 残差>max_res 视为不共线
-    返回 (None, res)——调用方据此降级/放弃。"""
-    pts = [(float(x), float(y)) for x, y in points]
-    if len(pts) < 2:
-        return None, float("inf")
-    if len(pts) == 2:
-        (x1, y1), (x2, y2) = pts
-        dx, dy = x2 - x1, y2 - y1
-        return math.degrees(math.atan2(dy, dx)), 0.0
-    n = len(pts)
-    mx = sum(x for x, _ in pts) / n
-    my = sum(y for _, y in pts) / n
-    sxx = sum((x - mx) ** 2 for x, _ in pts)
-    sxy = sum((x - mx) * (y - my) for x, y in pts)
-    if sxx < 1e-6:   # 连线接近垂直: 最小二乘 y=kx 病态, 用 atan2(sy, sx) 主方向
-        syx = sum((x - mx) * (y - my) for x, y in pts)
-        syy = sum((y - my) ** 2 for _, y in pts)
-        if syy < 1e-6:
-            return None, float("inf")
-        k = syx / syy
-        return math.degrees(math.atan2(1.0, k)) - 90.0, 0.0
-    k = sxy / sxx
-    res = math.sqrt(sum((y - (k * x + (my - k * mx))) ** 2
-                        for x, y in pts) / n)
-    if res > max_res:
-        return None, res
-    return math.degrees(math.atan(k)), res
-
-
 def find_materials(backend, frame, targets=None, conf=0.7, px_per_mm=1.0):
     """看一帧, 返回白名单内物料列表。
 

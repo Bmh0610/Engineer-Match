@@ -174,95 +174,6 @@ def _dump_miss_frame(frame, path, tag):
         pass
 
 
-def align_angle(lk, cam, centers_fn, timeout, offset=(0.0, 0.0)):
-    """角度纠偏(2026-11-05 用户定): 三心(环心/物料心)连线平行化——连线倾角
-    θ(相对画面水平线)≈车身偏航角, 转向 move_v(0,0,±θ) 让连线回平。
-    centers_fn(f) → 中心列表[(cx, cy), ...]; 检出降级梯度: ≥2 点即拟合
-    (2 点无共线校验, 噪声+20%); <2 点等待, 持续 ANGLE_GIVEUP_S → 放弃返回
-    (调用方进平移纠偏兜底, 保完赛)。收敛/超时/放弃均正常返回。"""
-    from vision import finder
-    deadline = time.time() + timeout
-    giveup_deadline = time.time() + C.ANGLE_GIVEUP_S
-    n_round = 0
-    ok_rounds = 0   # 连续死区轮计数(借鉴开源队 delay_visual 连续收敛判定:
-                    # 防"车身晃动的单帧恰好落进死区"误判提前收敛, 2026-11-05)
-    while time.time() < deadline and n_round < C.ALIGN_MAX_ITER:
-        f = cam.read_latest(timeout=0.2)
-        centers = [] if f is None else centers_fn(f)
-        if len(centers) < 2:
-            if time.time() >= giveup_deadline:
-                print("  [角度] 可见中心持续<2, 放弃角度纠偏(平移纠偏兜底)")
-                return
-            time.sleep(0.2)
-            continue
-        ang, res = finder.line_angle_deg(centers)
-        if ang is None:
-            print(f"  [角度] 三心不共线(残差 {res:.0f}px), 等待重试...")
-            ok_rounds = 0
-            time.sleep(0.3)
-            continue
-        ang = ang * C.ANGLE_SIGN
-        if abs(ang) <= C.ANGLE_TOL_DEG:
-            ok_rounds += 1
-            if ok_rounds >= C.ANGLE_OK_ROUNDS:
-                print(f"  ✓ 角度纠偏结束 (连续{ok_rounds}轮倾角 {ang:+.1f}°, "
-                      f"转向{n_round}次)")
-                if abs(offset[0]) > 1e-6 or abs(offset[1]) > 1e-6:
-                    _send_move_v(lk, offset[0], offset[1])
-                return
-            print(f"  [角度] 倾角 {ang:+.1f}° 在死区, 复测 {ok_rounds}/"
-                  f"{C.ANGLE_OK_ROUNDS} 确认...")
-            time.sleep(0.2)
-            continue
-        ok_rounds = 0
-        step = max(-C.ANGLE_MAX_STEP, min(C.ANGLE_MAX_STEP, ang)) * C.ANGLE_SIGN
-        n_round += 1
-        print(f"  [角度] 第{n_round}轮: 连线倾角 {ang:+.1f}° → 转向 {step:+.1f}°")
-        lk.move_v(0, 0, round(step * 10))
-        t0 = time.time()
-        while time.time() - t0 < C.CMD_TIMEOUT:
-            for f in lk.poll():
-                if f.mode == Mode.ACK_CHASSIS:
-                    break
-            else:
-                time.sleep(0.03)
-                continue
-            break
-        time.sleep(0.3)
-
-
-def align_angle_rings(lk, cam, backend, timeout):
-    """圆环区角度纠偏: 三环心连线平行化(place_rings 平移纠偏完成后调用)。"""
-    centers_fn = make_ring_centers_fn(backend)
-    align_angle(lk, cam, centers_fn, timeout)
-
-
-def align_angle_materials(lk, cam, backend, timeout):
-    """码垛区角度纠偏: 三物料心连线平行化(stack_rings 平移纠偏完成后调用)。"""
-    centers_fn = make_material_centers_fn(backend)
-    align_angle(lk, cam, centers_fn, timeout)
-
-
-def make_ring_centers_fn(backend):
-    """三环心检出闭包: find_rings ≥2 环 → [(cx, cy), ...](按 cx 排序)。"""
-    from task.ring import find_rings
-
-    def centers(f):
-        rings = find_rings(f, backend=backend)
-        return sorted([(r.cx, r.cy) for r in rings])[:3]
-    return centers
-
-
-def make_material_centers_fn(backend):
-    """三物料心检出闭包: find_materials ≥2 颗 → [(cx, cy), ...](按 cx 排序)。"""
-    from vision import finder
-
-    def centers(f):
-        mats = finder.find_materials(backend, f, conf=0.5, px_per_mm=C.PX_PER_MM)
-        return sorted([(m.cx, m.cy) for m in mats])[:3]
-    return centers
-
-
 def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
     """转盘定一纠偏(2026-11-04 用户定, 三态): 转动中/无料时**不发任何底盘帧**
     (防底盘追着转动的物料跑), 停歇后才看-动-再看。
@@ -514,7 +425,6 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
     seek_mid_ring(lk, cam, backend, timeout)
     align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
           "对中环纠偏(建锚)", timeout, auto=True, phase_switch_mm=10.0)
-    align_angle_rings(lk, cam, backend, timeout)   # 角度纠偏: 平移后三心连线平行化
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]
     else:
@@ -574,7 +484,6 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
                   "(同场景几何最接近; 标定: test_img2body_cal.py --stack 后填 config)")
         align_material_turntable(lk, cam, backend, timeout)   # 三态: 等清晰帧+框内优先
-        align_angle_materials(lk, cam, backend, timeout)   # 码垛角度纠偏: 三物料心连线平行化
         from vision import finder
         f = cam.read_latest(timeout=1.0)
         mats = [] if f is None else finder.find_materials(

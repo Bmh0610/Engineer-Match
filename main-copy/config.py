@@ -144,7 +144,7 @@ GRAB_ACK_TOTAL = 23   # 3颗总回执: 近端7 + 端位8×2 = 23(0x0012×17 + 0x
 # 环纠偏/分档以 (画面中心 + 此偏移) 为基准: (右+, 下+) px。
 # 换算: 右mm ≈ -0.5765×dy_px, 前mm ≈ -0.5732×dx_px(IMG2BODY_RING)。
 # (0, -10) ≈ 原 RING_ALIGN_OFFSET(-6, 0)mm 的等效(车最终左移约6mm)。
-RING_CAM_CENTER_OFFSET_PX = (+23.5, -8.5)
+RING_CAM_CENTER_OFFSET_PX = (+23.5, +8.5)
 RING_PITCH_MM = 150.0           # 环距(用户 2026-10-26 实测): 左环=中环左150, 右环=中环右150;
                                 # 放置=每环各自整车纠偏把环送到复位位正下方(±150盲送作废);
                                 # 环距留作参考与画面分档(RING_PITCH_PX)用
@@ -168,12 +168,6 @@ MODEL_PATH_RING = "/home/popcorn-car/main-copy/vision/best.engine"
 RING_CLS = {1: 7, 2: 8, 3: 9}   # 数字→模型类别号(原统一权重 circle1/2/3 编排;
                                 # 重训新模型后按新类别表改)
 RING_CONF = 0.4                 # 数字环检出门槛(贴纸数字小, 比物料 0.5 放宽)
-ANGLE_TOL_DEG = 1.5      # 角度纠偏死区(度): 三心连线倾角|θ|≤此值不转向
-ANGLE_MAX_STEP = 10.0    # 单次转向限幅(度, 防误检大角度疯转)
-ANGLE_SIGN = 1.0         # 图像角→车体转向符号(实车校验: 转向方向反了改-1)
-ANGLE_GIVEUP_S = 10.0    # 可见中心<2个持续此时长→放弃角度纠偏(进平移兜底)
-ANGLE_OK_ROUNDS = 2      # 连续 N 轮倾角在死区内才收敛(借鉴开源队 delay_visual
-                         # 连续计数——防单帧噪声误判提前收敛; 借鉴自 XAUT 开源码)
 RING_SETTLE = 1.5        # 判环/码垛前沉降(秒): goto/臂动作完成后余震衰减再取帧——
                          # 运动模糊帧的 ring_cv 数字识别不可靠(实测 0.638<0.78 且 2 误识成 3)
 RING_SEEK_STEP = 80             # 放环开场判环送位步长(mm): 相机对着1号环→y+80,
