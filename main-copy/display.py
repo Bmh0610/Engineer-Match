@@ -47,7 +47,7 @@ class StatusDisplay:
         四组码 2+2 拆两行(下行带 + 前缀); 2 组简写整行。"""
         groups = code.split("+")
         if len(groups) >= 4:
-            shown = "+".join(groups[:2]) + "\n" + "+".join(groups[2:])
+            shown = "+".join(groups[:2]) + "\n+" + "+".join(groups[2:])
         else:
             shown = code
         self._code.config(text=shown)
