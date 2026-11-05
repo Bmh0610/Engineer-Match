@@ -90,12 +90,12 @@ def _web_task(task):
 _STEP = [0]
 
 
-def run_step(lk, label, tx, ack, timeout=None, gap=1.0):
+def run_step(lk, label, tx, ack, timeout=None, gap=1.2):
     """发帧等回执(全自动, 无门控)。
     timeout=None 用 C.CMD_TIMEOUT; MODE5 成套动作传 ACTION_TIMEOUT——只等一次,
     调用方不得再包一层等待(曾双等: run_step 消费回执后 run_action 又空等 35s,
     每条动作白等一个超时窗, 2026-11-02 实车暴露)。
-    gap=完成后条间(默认1.0s=底盘腿间, 2026-11-05 用户定 1.5→1; 臂/MODE5 调用方传 0=零间隔衔接,
+    gap=完成后条间(默认1.2s=底盘腿间, 2026-11-05 用户定 1.5→1→1.2; 臂/MODE5 调用方传 0=零间隔衔接,
     2026-11-03 用户定: 到位立刻纠偏/组动作完成立刻发下一条)。"""
     _STEP[0] += 1
     print(f"[{_STEP[0]}] {label}")
