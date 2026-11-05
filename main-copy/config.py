@@ -51,7 +51,9 @@ ALIGN_TOL_MM_MATERIAL = 3.0   # 物料/转盘定一死区(2026-11-04 用户定�
                               # 大步快收, 小死区抖动期拖轮次反给转盘启动机会)
 ALIGN_TOL_MM_RING = 1.0       # 圆环区纠偏死区(用户定保持 1: 放环要精)
 ALIGN_TOL_MM = 1.0            # 通用缺省(留档工具 test_align_manual 等引用; 正式链路用上面两个)
-ALIGN_MAX_ITER = 10      # 最多几轮 看-动-再看(2026-11-03 用户定 5→10)
+ALIGN_MAX_ITER = 10      # 圆环纠偏最多几轮 看-动-再看(2026-11-03 用户定 5→10)
+ALIGN_MAX_ITER_MATERIAL = 5   # 物料/转盘定一纠偏最多几轮(2026-11-05 用户定改回5:
+                              # 转盘场景大步快收, 10 轮太久)
 ALIGN_TIMEOUT = 30.0     # 总超时(秒), 超时告警继续(保完赛)
 ALIGN_SETTLE = 0         # move_v 后沉降延时(2026-11-05 用户定去掉——0x0011 回执即阻塞到位, 车已停)
 STABLE_FRAMES = 2        # 连续 N 帧中心位移 < STABLE_TOL_PX 才采用(滤框抖)
@@ -144,7 +146,7 @@ GRAB_ACK_TOTAL = 23   # 3颗总回执: 近端7 + 端位8×2 = 23(0x0012×17 + 0x
 # 环纠偏/分档以 (画面中心 + 此偏移) 为基准: (右+, 下+) px。
 # 换算: 右mm ≈ -0.5765×dy_px, 前mm ≈ -0.5732×dx_px(IMG2BODY_RING)。
 # (0, -10) ≈ 原 RING_ALIGN_OFFSET(-6, 0)mm 的等效(车最终左移约6mm)。
-RING_CAM_CENTER_OFFSET_PX = (+23.5, +8.5)
+RING_CAM_CENTER_OFFSET_PX = (+21.5, +4.0)#左+右- 前+后-
 RING_PITCH_MM = 150.0           # 环距(用户 2026-10-26 实测): 左环=中环左150, 右环=中环右150;
                                 # 放置=每环各自整车纠偏把环送到复位位正下方(±150盲送作废);
                                 # 环距留作参考与画面分档(RING_PITCH_PX)用

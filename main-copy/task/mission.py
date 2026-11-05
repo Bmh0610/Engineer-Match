@@ -188,7 +188,7 @@ def align_material_turntable(lk, cam, backend, timeout, offset=(0.0, 0.0)):
     deadline = time.time() + timeout
     x0, x1, y0, y1 = C.ALIGN_BOX
     round_no = 0
-    while time.time() < deadline:
+    while time.time() < deadline and round_no < C.ALIGN_MAX_ITER_MATERIAL:
         f1 = cam.read_latest(timeout=0.2)
         m1 = [] if f1 is None else finder.find_materials(
             backend, f1, conf=0.5, px_per_mm=C.PX_PER_MM)
