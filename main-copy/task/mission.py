@@ -93,15 +93,21 @@ def _send_move_v(lk, dy_right, dx_fwd):
     return False
 
 
-def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
-          offset=(0.0, 0.0), phase_switch_mm=None):
-    """整车纠偏(圆环区/码垛): 看-动-再看, 死区 ≤ALIGN_TOL_MM_RING(1mm) ≤ALIGN_MAX_ITER 轮, 超时带误差继续(保完赛)。
+def align(lk, cam, find_fn, matrix, label, timeout=None, auto=True,
+          offset=(0.0, 0.0), phase_switch_mm=None, on_miss=None):
+    """整车纠偏(圆环区/码垛): 看-动-再看, 死区 ≤ALIGN_TOL_MM_RING(1mm)
+    ≤ALIGN_MAX_ITER 轮修正, 超时带误差继续(保完赛)。
     auto=True 不弹门控直接跑(建锚用); False 回车触发/s 跳过(人工兜底)。
     offset=(右,前) mm: 纠偏结束后补走的固定基准补偿(相机基准点漂移, 2026-11-03)。
     phase_switch_mm(2026-11-05 用户定两阶段): 非 None 时粗/精两段——
       粗段(bbox 中心, 对模糊帧稳)残差 <switch(mm) → 锁存切精段(几何中心),
       粗段死区=switch(10)、精段死区=ALIGN_TOL_MM_RING(1); 单向不回粗(防两基准
-      差几 px 来回横跳)。对象无 bbox 中心时粗=精(天然退化单阶段)。"""
+      差几 px 来回横跳)。对象无 bbox 中心时粗=精(天然退化单阶段)。
+    timeout=总预算秒(2026-11-06 修正: 此前形参被忽略恒用 ALIGN_TIMEOUT)。
+    on_miss(2026-11-06 用户定 取消放弃): 某轮未检出目标时调 on_miss(deadline)——
+      走"无环x-10/有环无2号y±80"找回目标(_reseek_ring2), 返回 True=找回继续
+      纠偏(不占修正次数); None/返回 False=原放弃行为。提供 on_miss 时单次
+      find_stable 等待缩短 2s(找回循环自己盯帧, 不吃整段预算)。"""
     if not auto:
         try:
             ans = input(f"\n<- 回车={label}(看-动-再看) / s=跳过: ").strip().lower()
@@ -111,14 +117,18 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
             print("  !! 跳过纠偏(人工兜底)")
             return
     from vision import finder
-    deadline = time.time() + C.ALIGN_TIMEOUT
+    deadline = time.time() + (timeout or C.ALIGN_TIMEOUT)
     done = False
     phase_fine = False
-    for i in range(1, C.ALIGN_MAX_ITER + 1):
-        obj, _fr = finder.find_stable(find_fn, cam,
-                                      timeout=max(0.5, deadline - time.time()))
+    n_corr = 0
+    while True:
+        wait_s = (max(0.5, min(2.0, deadline - time.time())) if on_miss
+                  else max(0.5, deadline - time.time()))
+        obj, _fr = finder.find_stable(find_fn, cam, timeout=wait_s)
         if obj is None:
-            print(f"  [纠偏] 第{i}轮未检出目标, 放弃(保完赛继续)")
+            if on_miss is not None and on_miss(deadline):
+                continue   # 目标找回, 纠偏继续(找回不占修正次数)
+            print("  [纠偏] 未检出目标(找回失败), 放弃(保完赛继续)")
             return
         a, b, c, d = matrix
         has_bbox = phase_switch_mm is not None and getattr(obj, "bbox_cx", None) is not None
@@ -140,15 +150,19 @@ def align(lk, cam, find_fn, matrix, label, timeout, auto=True,
             tol = phase_switch_mm
             tag = "粗段(bbox)"
         if residual <= tol:
-            print(f"  ✓ 纠偏结束 ({tag}, 残差 {residual:.1f}mm, {i} 轮)")
+            print(f"  ✓ 纠偏结束 ({tag}, 残差 {residual:.1f}mm, {n_corr} 次修正)")
             done = True
             break
         if time.time() > deadline:
             break
-        print(f"  [纠偏] 第{i}轮[{tag}]: 前{dx_fwd:+.1f} 右{dy_right:+.1f} (残差 {residual:.1f}mm)")
+        print(f"  [纠偏] 第{n_corr + 1}轮[{tag}]: 前{dx_fwd:+.1f} 右{dy_right:+.1f} (残差 {residual:.1f}mm)")
         _send_move_v(lk, dy_right, dx_fwd)
         time.sleep(C.ALIGN_SETTLE)
-    print("  纠偏结束(带误差, 保完赛继续)")
+        n_corr += 1
+        if n_corr >= C.ALIGN_MAX_ITER:
+            break
+    if not done:
+        print("  纠偏结束(带误差, 保完赛继续)")
     if offset[0] or offset[1]:
         _send_move_v(lk, offset[0], offset[1])
         print(f"  [纠偏] 基准补偿: 右{offset[0]:+.1f} 前{offset[1]:+.1f}mm")
@@ -351,6 +365,42 @@ def seek_mid_ring(lk, cam, backend, timeout):
     print("  !! 未见 2 号环(限次/限时), 直接纠偏(保完赛)")
 
 
+def _reseek_ring2(lk, cam, backend, deadline):
+    """纠偏丢标后的找回循环(2026-11-06 用户定, 取消放弃): 无环→x-10 扫描;
+    有环无2号→按最近环 y±80; 2 号重现→返回 True 继续纠偏。总预算耗尽→
+    返回 False(align 打印放弃, 唯一兜底)。每秒 [判环] 诊断行同 seek。"""
+    from task.ring import find_rings
+    t_line = time.time()
+    while time.time() < deadline:
+        f = cam.read_latest(timeout=0.2)
+        if f is None:
+            time.sleep(0.2)
+            continue
+        rings = find_rings(f, backend=backend)
+        now = time.time()
+        if now - t_line >= 1.0:
+            seg = [f"{r.digit}号({r.cx / f.shape[1]:.2f})" for r in rings]
+            print(f"  [判环] 环检出{len(rings)}: {' '.join(seg) or '(无)'}")
+            t_line = now
+        if not rings:
+            # ① 无环: x-10 步进扫描(2026-11-06 用户定)
+            _send_move_v(lk, C.RING_SEEK_STEP_X, 0)
+            print(f"  · 无环, x{C.RING_SEEK_STEP_X:+.0f} 扫描(丢标找回)")
+            time.sleep(0.3)
+            continue
+        ring2 = [r for r in rings if r.digit == 2]
+        if ring2:
+            print("  ✓ 2 号环重现, 继续纠偏")
+            return True
+        # ② 有环无2号: 按最近环定 y 向(1号=y+80 / 3号=y−80, 2026-11-05 更正)
+        hit = min(rings, key=lambda r: r.dx ** 2 + r.dy ** 2)
+        dy = C.RING_SEEK_STEP if hit.digit == 1 else -C.RING_SEEK_STEP
+        print(f"  · 见 {hit.digit} 号, 沿 y{dy:+.0f} 找 2 号(丢标找回)")
+        _send_move_v(lk, dy, 0)
+        time.sleep(0.5)
+    return False
+
+
 # ---- 动作组①: 抓料(守株待兔, 批1/批2 通用) ----
 
 def _wait_aligned_leave(cam, backend, mat, timeout=8.0):
@@ -415,16 +465,19 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
 
 
 def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
-    """放环(组1): 回复位→判环找中环→对中环纠偏建锚→逐轮发。
+    """放环(组1): 回复位→找环+对中环纠偏建锚一体循环(取消放弃, 丢标自动找回)→逐轮发。
     mode='rough': (1, rings[i], 盘格i) 按任务码环号序(粗加工区, G2/G4);
     mode='buffer': (1, i, i) 恒等正序(暂存区第一圈, 零账本)。返回 (ok, total)。"""
     from vision import finder
     print(f"\n===== 放环 ({'粗加工区' if mode == 'rough' else '暂存区'}) =====")
     arm_move(lk, C.RESET, "回复位")
     arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
-    seek_mid_ring(lk, cam, backend, timeout)
+    # 找环+纠偏一体(2026-11-06 用户定 取消放弃): 2号在视野即纠偏; 修正走完丢2号
+    # → on_miss 找回循环(无环x-10/有环无2号y±80)重找, 预算内绝不放弃,
+    # 耗尽才带误差继续(保完赛); 原独立 seek 段并入 on_miss(开局找环同规则)
     align(lk, cam, find_ring_mid_fn(backend), C.IMG2BODY_RING,
-          "对中环纠偏(建锚)", timeout, auto=True, phase_switch_mm=10.0)
+          "对中环纠偏(建锚)", C.RING_ALIGN_TOTAL, auto=True, phase_switch_mm=10.0,
+          on_miss=lambda dl: _reseek_ring2(lk, cam, backend, dl))
     if mode == "rough":
         seq = [(r, i) for i, r in enumerate(rings, 1)]
     else:

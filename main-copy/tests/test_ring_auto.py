@@ -39,10 +39,11 @@ def digit_map(f, backend):
 
 
 def run_round(lk, cam, backend, timeout):
-    """一轮=place_rings 纠偏段(seek→align), 去掉 MODE5; 收敛后打印数字→位置。"""
-    M.seek_mid_ring(lk, cam, backend, timeout)
+    """一轮=place_rings 纠偏段(找环+纠偏一体, on_miss 丢标找回, 取消放弃);
+    收敛后打印数字→位置。"""
     M.align(lk, cam, M.find_ring_mid_fn(backend), C.IMG2BODY_RING,
-            "对中环纠偏(建锚)", timeout, auto=True, phase_switch_mm=10.0)
+            "对中环纠偏(建锚)", timeout, auto=True, phase_switch_mm=10.0,
+            on_miss=lambda dl: M._reseek_ring2(lk, cam, backend, dl))
     f = cam.read_latest(timeout=0.5)
     if f is not None:
         print(f"  数字→位置: {digit_map(f, backend)}")
@@ -54,8 +55,8 @@ def main():
     ap.add_argument("--port", default=C.SERIAL_PORT)
     ap.add_argument("--model-ring", default=C.MODEL_PATH_RING,
                     help="圆环检测引擎(YOLO 定身份; 缺文件=判环全空, 测试无意义)")
-    ap.add_argument("--timeout", type=float, default=C.ACTION_TIMEOUT,
-                    help="单轮 seek/纠偏总超时(秒; main.py 同款 ACTION_TIMEOUT)")
+    ap.add_argument("--timeout", type=float, default=C.RING_ALIGN_TOTAL,
+                    help="单轮找环+纠偏一体总预算(秒; 默认 RING_ALIGN_TOTAL)")
     ap.add_argument("--rounds", type=int, default=0,
                     help="回车一次连跑轮数(0=每轮手动回车)")
     args = ap.parse_args()
