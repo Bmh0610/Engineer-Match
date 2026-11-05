@@ -80,10 +80,17 @@ class NavDriver:
         self.rotation_sign = self.nav.map.rotation_sign
 
     def _send_move(self, x, y, z, label):
-        """一条 move_v 等 ACK_CHASSIS 完成码; 静默超时抛错不重发(单命令在途)。"""
+        """一条 move_v 等 ACK_CHASSIS 完成码; 静默超时抛错不重发(单命令在途)。
+        延时按腿分档(2026-11-05 用户定): 平移距离 ≤100mm → gap 0(短腿余摆小,
+        且后续多在同区/纠偏闭环); >100 或转向腿 → 1.2s(转弯余摆影响朝向)。"""
         self.lk.send_and_wait(lambda: self.lk.move_v(x, y, z),
                               Mode.ACK_CHASSIS, C.CMD_TIMEOUT, label)
-        time.sleep(1.2)                 # 腿间 1.2s(2026-11-05 用户定 1.5→1→1.2)
+        if z:
+            time.sleep(1.2)             # 转向腿: 余摆影响朝向, 保持 1.2
+        elif math.hypot(x, y) <= 100:
+            pass                        # 短平移腿: 零延时
+        else:
+            time.sleep(1.2)             # 长直行腿: 保持 1.2
 
     def launch(self, jog=None):
         """发车对位腿(摆车位→车道中心节点, 车体系 右移,前进 mm)。对位不入图,

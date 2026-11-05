@@ -125,9 +125,17 @@ def arm(lk, label, pose, gap=0):
 
 
 def leg_move(lk, dx, dy, dz, label):
-    """行程腿 move_v(不入账——腿间移动, 非工作区微调)。"""
+    """行程腿 move_v(不入账——腿间移动, 非工作区微调)。
+    延时按腿分档(2026-11-05 用户定): 平移 ≤100mm → gap 0; 转向/长腿 → 1.2。"""
+    dist = math.hypot(dx, dy)
+    if dz:                      # 转向腿: 余摆影响朝向
+        gap = 1.2
+    elif dist <= 100:           # 短平移腿(≤100mm): 零延时(2026-11-05 用户定)
+        gap = 0.0
+    else:                       # 长直行腿: 保持 1.2
+        gap = 1.2
     run_step(lk, f"[腿] {label} (右{dx:+.0f} 前{dy:+.0f} 转{dz:+.0f})",
-             frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS)
+             frame(Mode.MOVE_V, dx, dy, dz), Mode.ACK_CHASSIS, gap=gap)
 
 
 # ---- 纠偏(看-动-再看) ----
