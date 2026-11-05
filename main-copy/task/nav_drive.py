@@ -182,6 +182,18 @@ class NavDriver:
             prims = self.nav.plan(target, stop_heading)
             self._explain(self.nav.path, stop_heading)
             moves = [(p[1], p[2], p[3]) for p in prims if p[0] == "move"]
+            # 同向连续 move 合并(2026-11-05 用户定): 途经节点不停, 一杆直行——
+            # 如 6→5→4 合并为 6→4(1650mm), 省 1.2s 腿间停顿; 身份=叉积≈0 且同向。
+            # 封边/check 粒度: 合并边在出发节点一次 check 覆盖整条直线, 等价。
+            merged = []
+            for dx, dy, arrival in moves:
+                if merged:
+                    pdx, pdy, _ = merged[-1]
+                    if abs(pdx * dy - pdy * dx) < 1e-6 and pdx * dx + pdy * dy > 0:
+                        merged[-1] = (pdx + dx, pdy + dy, arrival)
+                        continue
+                merged.append((dx, dy, arrival))
+            moves = merged
             blocked = False
             for dx, dy, arrival in moves:
                 target_h = math.atan2(dy, dx)      # 该边地图系朝向(正交网格=±90°档)
