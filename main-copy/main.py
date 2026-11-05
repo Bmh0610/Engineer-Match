@@ -136,9 +136,10 @@ class Step2_Leg1Grab(State):
             ctx.display.set_step("物料盘→守株抓料")
         ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
                                    ctx.task["batch1_colors"], ctx.grab_wait, "批1")
-        if mm:
-            ctx.nav.retreat(mm)
-        ctx.nav.approach(C.ARM_CENTER_COMP_MM, axis="y")   # 臂不在中心: 沿y+前推30, 修正后车体=图上节点
+        # 抓料完成收尾合成一帧(2026-11-05 用户定): x-退回进给 + y+臂中心补偿20
+        # 斜向一步回节点位(原先 retreat+approach 两腿拆发)
+        ctx.nav._send_move(-mm, C.ARM_CENTER_COMP_MM, 0,
+                           "抓料完成: 退回进给+前推补偿(斜向回节点位)")
         ctx.stats.append(("批1抓料", ok, tot))
         ctx.current_state = Step3_Leg1Rough()
 
@@ -177,9 +178,10 @@ class Step5_Leg2Grab(State):
             ctx.nav.approach(mm)
         ok, tot = M.grab_materials(ctx.lk, ctx.end_cam, ctx.backend,
                                    ctx.task["batch2_colors"], ctx.grab_wait, "批2")
-        if mm:
-            ctx.nav.retreat(mm)
-        ctx.nav.approach(C.ARM_CENTER_COMP_MM, axis="y")
+        # 抓料完成收尾合成一帧(2026-11-05 用户定): x-退回进给 + y+臂中心补偿20
+        # 斜向一步回节点位(原先 retreat+approach 两腿拆发)
+        ctx.nav._send_move(-mm, C.ARM_CENTER_COMP_MM, 0,
+                           "抓料完成: 退回进给+前推补偿(斜向回节点位)")
         ctx.stats.append(("批2抓料", ok, tot))
         ctx.current_state = Step6_Leg2Rough()
 
