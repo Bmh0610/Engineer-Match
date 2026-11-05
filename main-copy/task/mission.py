@@ -442,13 +442,14 @@ def seek_mid_ring(lk, cam, backend, timeout):
 
 # ---- 动作组①: 抓料(守株待兔, 批1/批2 通用) ----
 
-def _wait_aligned_leave(cam, backend, mat, timeout=8.0, move_px=15.0):
-    """等纠偏料离开纠偏位(转盘复转带走, 纠偏料不作首抓的等色版落地):
-    同色料从原位置消失(move_px 半径内无)连续 2 帧即算离开——之后 wait_for_color
-    的停歇稳定门控保证首抓落在新停歇事件上, 避开纠偏 move_v 余震窗。
-    超时放弃照常等色(转盘停歇过长, 不死等保完赛)。"""
+def _wait_aligned_leave(cam, backend, mat, timeout=8.0):
+    """等纠偏料转出抓取窗(纠偏料不作首抓的等色版落地, 2026-11-06 用户定
+    "等一轮回来再抓"): 窗内不再有同色料连续 2 帧即算出窗——它须整圈转回重新
+    进窗+停歇才会被 wait_for_color 接受, 首抓必落在新停歇事件上(避开纠偏
+    move_v 余震窗)。超时放弃照常等色(转盘停歇过长, 不死等保完赛)。"""
     from vision import finder
-    print(f"  · 纠偏料 {mat.color} 不作首抓: 等它离开纠偏位(≤{timeout:.0f}s)...")
+    x0, x1, y0, y1 = C.GRAB_WINDOW
+    print(f"  · 纠偏料 {mat.color} 不作首抓: 等它转出抓取窗(≤{timeout:.0f}s)...")
     deadline = time.time() + timeout
     gone = 0
     while time.time() < deadline:
@@ -456,16 +457,17 @@ def _wait_aligned_leave(cam, backend, mat, timeout=8.0, move_px=15.0):
         if f is None:
             time.sleep(0.1)
             continue
+        h, w = f.shape[:2]
         mats = finder.find_materials(backend, f, [mat.color],
                                      conf=0.5, px_per_mm=C.PX_PER_MM)
-        near = [m for m in mats
-                if math.hypot(m.cx - mat.cx, m.cy - mat.cy) < move_px]
-        gone = gone + 1 if not near else 0
+        in_win = [m for m in mats
+                  if x0 * w <= m.cx <= x1 * w and y0 * h <= m.cy <= y1 * h]
+        gone = gone + 1 if not in_win else 0
         if gone >= 2:
-            print("  · 纠偏料已离开(转盘复转), 开始等色")
+            print("  · 纠偏料已出窗(转盘复转), 开始等色(整圈转回再抓)")
             return
         time.sleep(C.FRAME_GAP)
-    print("  · 等离开超时(转盘停歇过长), 照常等色(保完赛)")
+    print("  · 等出窗超时(转盘停歇过长), 照常等色(保完赛)")
 
 
 def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
@@ -473,8 +475,8 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
     臂缩回复位→定一纠偏建锚→车全程不动——逐色等**任务码第1组顺序**的目标色
     进窗+停歇稳定即发组2 (2, 2, i)。Y=2 恒定=取料工位; Z=i=顺序格(第 i 色上
     盘格 i)。单色超时跳过(保完赛, 盘格空置)。
-    纠偏料不作首抓(2026-11-06 用户定, 等色版落地): 纠偏料恰为首抓色时, 先等
-    转盘复转把它带离纠偏位再开始等色(顺序不变, 它转回来停进窗照常第1个抓);
+    纠偏料不作首抓(2026-11-06 用户定): 纠偏料恰为首抓色时, 先等转盘复转把它
+    带出抓取窗再开始等色——它须整圈转回重新进窗+停歇才作为第1个抓(等一轮回来);
     纠偏料≠首抓色时无需处理(wait_for_color 按色过滤, 天然不会抓它)。
     返回 (ok, total)。"""
     from vision import finder
