@@ -441,7 +441,6 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
     if use_vision:
         arm_move(lk, C.RESET, "抬臂至标定高度(码垛纠偏前, RESET Y=1810=标定高度, 2026-11-03 用户改)")
         arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
-        time.sleep(C.RING_SETTLE)   # 沉降(同判环: 余震模糊帧检出不可靠)
         matrix = C.IMG2BODY_STACK if C.IMG2BODY_STACK is not None else C.IMG2BODY_RING
         if C.IMG2BODY_STACK is None:
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"
