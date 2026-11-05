@@ -214,13 +214,14 @@ class Step8_ReturnHome(State):
     def execute(self, ctx):
         # 启1/启2 统一强制末朝向朝西(2026-11-05 用户定): 两车回库路径末边都
         # 自然朝西=零额外转向(恢复发车朝向反而要多转90/180°); 规则不规定回库
-        # 朝向。入库微调(启1): 车头朝西(不转), 场地系 y-200→x-200 回摆车位。
+        # 朝向。入库单动作(2026-11-05 用户定): 车头朝西时摆车位偏移=右200+
+        # 后退200(车体系 x+200/y-200), 斜向一步到位。⚠启2 摆车位偏移若与
+        # 启1 不同, 实车校正本帧数字。
         west = -math.pi / 2
         _goto(ctx, ctx.start_node, f"{ZONE_NAME[ctx.start_node]}(回程)",
               stop_heading=west)
-        if ctx.start_node == 1 and ctx.nav is not None:
-            ctx.nav._send_move(200, 0, 0, "入库: x+200=车右移200")
-            ctx.nav._send_move(0, -200, 0, "入库: 场地x-200(实车方向反了, 用户改: 车后退)")
+        if ctx.nav is not None:
+            ctx.nav._send_move(200, -200, 0, "入库: 右移200+后退200(斜向回摆车位)")
         ctx.current_state = Step9_Done()
 
 
