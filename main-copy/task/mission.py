@@ -412,8 +412,8 @@ def grab_rings(lk, rings, timeout):
     for r in order:
         if run_action(lk, 3, r, r, timeout):
             ok += 1
-    _send_move_v(lk, 0, -20)   # 2026-11-05 用户定 30→20: 抓环后回节点位
-    print("  · 抓环后 y-20 回节点位")
+    _send_move_v(lk, 0, 20)    # 2026-11-05 用户定: 抓环后 y+20(方向反转)
+    print("  · 抓环后 y+20")
     print(f"== 抓环完成 ({ok}/{len(order)}, 盘格=环号恒等) ==")
     return ok, len(order)
 
