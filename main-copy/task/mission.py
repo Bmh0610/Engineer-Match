@@ -184,7 +184,7 @@ def align_angle(lk, cam, centers_fn, timeout, offset=(0.0, 0.0)):
     deadline = time.time() + timeout
     giveup_deadline = time.time() + C.ANGLE_GIVEUP_S
     n_round = 0
-    while time.time() < deadline:
+    while time.time() < deadline and n_round < C.ALIGN_MAX_ITER:
         f = cam.read_latest(timeout=0.2)
         centers = [] if f is None else centers_fn(f)
         if len(centers) < 2:
