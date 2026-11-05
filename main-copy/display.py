@@ -44,7 +44,9 @@ class StatusDisplay:
 
     def set_task(self, code, batch1=None, batch2=None):
         """扫码后设任务码(屏幕只显示数字和加号; batch 参数忽略, 兼容调用方)。
-        四组码 2+2 拆两行(下行带 + 前缀); 2 组简写整行。"""
+        四组码 2+2 拆两行(下行带 + 前缀); 2 组简写整行。关窗后 no-op。"""
+        if not self._alive:
+            return
         groups = code.split("+")
         if len(groups) >= 4:
             shown = "+".join(groups[:2]) + "\n+" + "+".join(groups[2:])
