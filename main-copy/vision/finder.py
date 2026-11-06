@@ -180,10 +180,15 @@ def find_stable(finder, cam, timeout=3.0, need=None, tol_px=None):
     return None, None
 
 
+def _conf_for(color):
+    """按色确认门槛(2026-11-06): CONFIRM_CONF_COLOR 覆盖(黑 0.75), 缺省 CONFIRM_CONF。"""
+    return C.CONFIRM_CONF_COLOR.get(color, C.CONFIRM_CONF)
+
+
 def confirm_color(backend, cam, color, px_per_mm=None, conf=None, frames=None):
     """时序一致性: 连续 N 帧该色存在(conf≥门槛)且中心几乎不动(转盘停歇)
-    才返回 Material, 否则 None。"""
-    conf = C.CONFIRM_CONF if conf is None else conf
+    才返回 Material, 否则 None。门槛=按色覆盖(CONFIRM_CONF_COLOR), 可显式传 conf 覆盖。"""
+    conf = _conf_for(color) if conf is None else conf
     frames = frames or C.CONFIRM_FRAMES
     px_per_mm = _warn_px_ratio(px_per_mm)
     last = None
@@ -210,7 +215,7 @@ def wait_for_color(backend, cam, color, px_per_mm=None, timeout=None,
     臂提前守在窗上方由调度层做, 这里只答"目标色到了没、在哪"。"""
     timeout = C.WAIT_COLOR_TIMEOUT if timeout is None else timeout
     window = C.GRAB_WINDOW if window is None else window
-    conf = C.CONFIRM_CONF if conf is None else conf
+    conf = _conf_for(color) if conf is None else conf   # 按色门槛(黑 0.75, 2026-11-06)
     px_per_mm = _warn_px_ratio(px_per_mm)
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -234,10 +239,13 @@ def wait_any_color(backend, cam, px_per_mm=None, timeout=None,
     """守株待兔·对号入座版(2026-11-03 用户定): 任意色进抓取窗+连帧稳定
     (转盘停歇)即返回 (Material, frame)——抓取顺序由转盘实况决定, 盘格由
     调用方按任务码色序查表(色 c 在第 k 位 → 放盘格 k), 不再等特定色。
-    exclude: 已抓色(防御性过滤, 正常该料抓走后不会再检出)。"""
+    exclude: 已抓色(防御性过滤, 正常该料抓走后不会再检出)。
+    门槛按色(2026-11-06): 扫描过滤=各色门槛最小值(低 conf 黑料不预丢),
+    逐色确认在 confirm_color 内查 CONFIRM_CONF_COLOR。"""
     timeout = C.WAIT_COLOR_TIMEOUT if timeout is None else timeout
     window = C.GRAB_WINDOW if window is None else window
-    conf = C.CONFIRM_CONF if conf is None else conf
+    if conf is None:
+        conf = min(_conf_for(c) for c in C.CLS2COLOR.values())
     px_per_mm = _warn_px_ratio(px_per_mm)
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -251,7 +259,7 @@ def wait_any_color(backend, cam, px_per_mm=None, timeout=None,
                 continue
             if (window[0] * w <= m.cx <= window[1] * w
                     and window[2] * h <= m.cy <= window[3] * h):
-                m2 = confirm_color(backend, cam, m.color, px_per_mm, conf)
+                m2 = confirm_color(backend, cam, m.color, px_per_mm)
                 if m2:
                     return m2, f
         time.sleep(C.FRAME_GAP)
