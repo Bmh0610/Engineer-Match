@@ -93,6 +93,38 @@ def _send_move_v(lk, dy_right, dx_fwd):
     return False
 
 
+class _Median:
+    """精段多帧中位数结果(只带 align 用到的 dx/dy/cx/cy)。"""
+    def __init__(self, dx, dy, cx, cy, n):
+        self.dx, self.dy, self.cx, self.cy, self.n = dx, dy, cx, cy, n
+
+
+def _sample_fine(cam, find_fn, timeout):
+    """精段采样: 取 RING_FINE_FRAMES 张不同的新帧, 只收几何精定位成功的检测
+    (precise=False 的 bbox 降级帧丢弃, 防两种中心混用), 对 dx/dy 取中位数。
+    有效帧 < RING_FINE_MIN_VALID → None(按未检出处理)。"""
+    import statistics
+    deadline = time.time() + timeout
+    last_frame = cam.read_latest(timeout=0.2)   # 当前缓冲帧作废, 只要之后的新帧
+    hits, seen = [], 0
+    while seen < C.RING_FINE_FRAMES and time.time() < deadline:
+        f = cam.read_latest(timeout=0.2)
+        if f is None or f is last_frame:
+            time.sleep(0.01)
+            continue
+        last_frame = f
+        seen += 1
+        obj = find_fn(f)
+        if obj is not None and getattr(obj, "precise", True):
+            hits.append(obj)
+    if len(hits) < C.RING_FINE_MIN_VALID:
+        print(f"  [纠偏] 精段有效帧 {len(hits)}/{seen} 不足, 本轮作废")
+        return None
+    med = statistics.median
+    return _Median(med(o.dx for o in hits), med(o.dy for o in hits),
+                   med(o.cx for o in hits), med(o.cy for o in hits), len(hits))
+
+
 def align(lk, cam, find_fn, matrix, label, timeout=None, auto=True,
           offset=(0.0, 0.0), phase_switch_mm=None, on_miss=None):
     """整车纠偏(圆环区/码垛): 看-动-再看, 死区 ≤ALIGN_TOL_MM_RING(1mm)
@@ -120,13 +152,18 @@ def align(lk, cam, find_fn, matrix, label, timeout=None, auto=True,
     deadline = time.time() + (timeout or C.ALIGN_TIMEOUT)
     done = False
     phase_fine = False
+    fine_mode = phase_switch_mm is not None
     n_corr = 0
     while True:
         wait_s = (max(0.5, min(2.0, deadline - time.time())) if on_miss
                   else max(0.5, deadline - time.time()))
-        obj, _fr = finder.find_stable(find_fn, cam, timeout=wait_s)
+        if fine_mode and phase_fine:
+            obj = _sample_fine(cam, find_fn, timeout=max(1.0, wait_s))
+        else:
+            obj, _fr = finder.find_stable(find_fn, cam, timeout=wait_s)
         if obj is None:
             if on_miss is not None and on_miss(deadline):
+                phase_fine = False   # 找回走过 ±80mm, 偏差可能很大, 回粗段重新收敛
                 continue   # 目标找回, 纠偏继续(找回不占修正次数)
             print("  [纠偏] 未检出目标(找回失败), 放弃(保完赛继续)")
             return
@@ -141,10 +178,15 @@ def align(lk, cam, find_fn, matrix, label, timeout=None, auto=True,
             cres = math.hypot(cdx, cdy)
             if cres < phase_switch_mm:
                 phase_fine = True   # 单向锁存切精段
+                print(f"  [纠偏] 粗段残差 {cres:.1f}mm < {phase_switch_mm:.0f}, 切精段(多帧中位数)")
+                continue            # 精段用多帧中位数重新采样, 不用这一帧单帧结果
+        gain = 1.0
         if phase_fine or not has_bbox:
             dy_right, dx_fwd, residual = fine_dx, fine_dy, fine_res
             tol = C.ALIGN_TOL_MM_RING
-            tag = "精段(几何)"
+            tag = f"精段(几何×{getattr(obj, 'n', 1)}帧中位)" if phase_fine else "精段(几何)"
+            if phase_fine:
+                gain = C.RING_FINE_GAIN
         else:
             dy_right, dx_fwd, residual = cdy, cdx, cres
             tol = phase_switch_mm
@@ -155,9 +197,17 @@ def align(lk, cam, find_fn, matrix, label, timeout=None, auto=True,
             break
         if time.time() > deadline:
             break
-        print(f"  [纠偏] 第{n_corr + 1}轮[{tag}]: 前{dx_fwd:+.1f} 右{dy_right:+.1f} (残差 {residual:.1f}mm)")
-        _send_move_v(lk, dy_right, dx_fwd)
-        time.sleep(C.ALIGN_SETTLE)
+        mv_r, mv_f = dy_right * gain, dx_fwd * gain
+        if round(mv_r) == 0 and round(mv_f) == 0:
+            # 乘系数后两轴都被 round 成 0 → 车不动白耗轮次; 大的一轴补到 ±1mm
+            if abs(mv_r) >= abs(mv_f):
+                mv_r = math.copysign(1, mv_r)
+            else:
+                mv_f = math.copysign(1, mv_f)
+        print(f"  [纠偏] 第{n_corr + 1}轮[{tag}]: 前{dx_fwd:+.1f} 右{dy_right:+.1f} "
+              f"(残差 {residual:.1f}mm) → 走 前{round(mv_f):+d} 右{round(mv_r):+d}")
+        _send_move_v(lk, mv_r, mv_f)
+        time.sleep(C.RING_FINE_SETTLE if phase_fine else C.ALIGN_SETTLE)
         n_corr += 1
         # 圆环纠偏不设轮次上限(2026-11-05 用户定: 直到收敛<1mm)——
         # 兜底=总预算 RING_ALIGN_TOTAL(90s)超时带误差继续

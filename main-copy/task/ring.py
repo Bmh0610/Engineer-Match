@@ -38,6 +38,7 @@ class Ring:
     dy: float
     bbox_cx: float = 0.0  # YOLO bbox 中心(两阶段纠偏粗段用; 几何中心=cx/cy 精段用)
     bbox_cy: float = 0.0
+    precise: bool = True  # cx/cy 来自几何精定位; False=降级 bbox 中心(精段纠偏丢弃)
 
 
 def _dump_miss(frame, tag):
@@ -106,7 +107,8 @@ def find_rings(frame, digit=None, backend=None):
             print(f"  [判环] {digit_d} 号环几何降级 bbox 中心")
         out.append(Ring(digit_d, d.conf, d.xyxy, cx, cy,
                         cx - (w / 2 + ox), cy - (h / 2 + oy),
-                        bbox_cx=bx_cx - (w / 2 + ox), bbox_cy=bx_cy - (h / 2 + oy)))
+                        bbox_cx=bx_cx - (w / 2 + ox), bbox_cy=bx_cy - (h / 2 + oy),
+                        precise=precise is not None))
     if not out and digit is None:
         # YOLO 全空 → 全画面 ring_cv 几何 + x 排序兜底(身份来自排列, 左1中2右3)
         try:
