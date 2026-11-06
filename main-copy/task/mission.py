@@ -159,8 +159,8 @@ def align(lk, cam, find_fn, matrix, label, timeout=None, auto=True,
         _send_move_v(lk, dy_right, dx_fwd)
         time.sleep(C.ALIGN_SETTLE)
         n_corr += 1
-        if n_corr >= C.ALIGN_MAX_ITER:
-            break
+        # 圆环纠偏不设轮次上限(2026-11-05 用户定: 直到收敛<1mm)——
+        # 兜底=总预算 RING_ALIGN_TOTAL(90s)超时带误差继续
     if not done:
         print("  纠偏结束(带误差, 保完赛继续)")
     if offset[0] or offset[1]:
