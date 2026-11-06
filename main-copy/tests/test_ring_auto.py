@@ -5,11 +5,11 @@
 自动发送——摆车回车后车会自己动, 回车前确保车前区域安全。
 
 链路=正式链路逐字复用(task/mission.py, 与 place_rings 纠偏段一致):
-  arm_move(RESET) → arm_move(RING_ALIGN 圆环纠偏位)
-  → seek_mid_ring(判环: 1号→y+80 / 3号→y−80 / 无环→x+10 扫描, ≤3 步)
-  → align(find_ring_mid_fn 锁 2 号环, IMG2BODY_RING, 粗段(bbox)残差<10 切
-    精段(几何), 精段死区 ALIGN_TOL_MM_RING=1mm, ≤ALIGN_MAX_ITER 轮,
-    超时带误差继续保完赛)
+  arm_move(RESET) → arm_move(RING_ALIGN 圆环纠偏位, 夹爪同发开到 900=GRIP_VISION)
+  → align 找环+纠偏一体(on_miss=_reseek_ring2, 取消放弃):
+      无环→x-10 扫描 / 有环无2号→1号y+80·3号y−80 / 2号在视野→纠偏
+      (粗段bbox残差<10 切精段几何, 死区 ALIGN_TOL_MM_RING), 纠偏后丢2号→回扫描;
+      唯一出口=收敛, RING_ALIGN_TOTAL 总预算耗尽带误差继续保完赛)
   → 收敛帧打印 数字→位置 映射(顺便核对 1/2/3 检出分档)。
 
 用法: python3 tests/test_ring_auto.py [--port /dev/ttyUSB0]
