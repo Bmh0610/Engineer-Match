@@ -55,7 +55,7 @@ class StatusDisplay:
         self.root.rowconfigure(0, weight=1)
 
         self._code = tk.Label(self.root, text="",
-                              font=('monospace', 96, 'bold'),
+                              font=('monospace', 140, 'bold'),
                               fg=FG, bg=BG, justify='center')
         self._code.grid(row=0, column=0, sticky='nsew')
 
