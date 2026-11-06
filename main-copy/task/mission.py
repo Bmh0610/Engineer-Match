@@ -528,7 +528,8 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
     from vision import finder
     print(f"\n===== {batch} 抓料 (守株: 按任务码顺序逐色等待) =====")
     arm_move(lk, C.RESET, "缩回复位(定一纠偏位)", grip=C.GRIP_VISION)   # 张爪900与臂同发
-    c_first = align_material_turntable(lk, cam, backend, wait)   # 三态; 接住纠偏料
+    c_first = align_material_turntable(lk, cam, backend,
+                                       C.TURNTABLE_ALIGN_TIMEOUT)   # 三态; 接住纠偏料(预算与判色解耦)
     if c_first is not None and c_first.color == colors[0]:
         _wait_aligned_leave(cam, backend, c_first)
     ok = 0

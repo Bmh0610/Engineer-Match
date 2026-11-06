@@ -77,7 +77,10 @@ CONFIRM_CONF_COLOR = {"black": 0.75}   # 按色覆盖确认门槛(2026-11-06 用
                                        # 0.85 会卡到等色超时; 其余色走 CONFIRM_CONF
 CONFIRM_FRAMES = 3       # 连续 N 帧同色才认(滤反光闪色)
 FRAME_GAP = 0.05         # 采帧间隔 > 帧周期, 保证不是同一帧
-WAIT_COLOR_TIMEOUT = 30.0   # 单色等待超时(含换料等待), 超时跳过该色
+WAIT_COLOR_TIMEOUT = 10.0   # 单色等待(判色)超时(秒), 超时跳过该色(2026-11-06 用户定 →10;
+                            # main.py --wait 缺省取此值, 比赛跑法不带 --wait 即 10s)
+TURNTABLE_ALIGN_TIMEOUT = 60.0   # 物料盘定一纠偏总预算(秒): 与判色超时解耦(2026-11-06),
+                                 # 保持原 --wait 60 行为——判色改 10s 不连带缩纠偏
 
 # ---- 跨帧后处理(移植沈航 common.py 思路: 确认→滤波→保持→消歧) ----
 TRACK_CONFIRM_FRAMES = 3   # 连续 N 帧命中才确认(confirmed)

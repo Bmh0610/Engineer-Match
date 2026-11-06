@@ -244,7 +244,7 @@ class Context:
 
     def __init__(self, lk, scanner, scan_cam, end_cam, backend, backend_ring,
                  display, watcher, skip_start=False, start_node=None,
-                 grab_wait=60.0, no_vision=False, skip_to=None):
+                 grab_wait=C.WAIT_COLOR_TIMEOUT, no_vision=False, skip_to=None):
         self.lk, self.scanner, self.scan_cam = lk, scanner, scan_cam
         self.end_cam, self.backend = end_cam, backend
         self.backend_ring = backend_ring   # 圆环检测(YOLO, 2026-11-05 换回); None=判环跳过
@@ -287,8 +287,8 @@ def main():
                     help="关闭节点检测(无前相机/纯跑图用; 默认开启——节点上摄像头判下一条边)")
     ap.add_argument("--no-vision", action="store_true",
                     help="码垛不开相机, 按任务码推演(未接末端相机/联调)")
-    ap.add_argument("--wait", type=float, default=60.0,
-                    help="守株抓料单色等待超时(秒, 默认60; 比赛值按转盘一圈周期调)")
+    ap.add_argument("--wait", type=float, default=C.WAIT_COLOR_TIMEOUT,
+                    help="守株抓料单色等待(判色)超时(秒, 默认 config.WAIT_COLOR_TIMEOUT=10)")
     ap.add_argument("--skip-to", choices=("start", "rough1", "buffer1",
                                           "rough2", "stack", "home"),
                     default="start",
