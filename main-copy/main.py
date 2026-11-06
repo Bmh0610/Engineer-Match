@@ -340,6 +340,9 @@ def main():
         ctx.run()
     except RuntimeError as e:   # 硬失败: 通信静默(不重发策略)
         print(f"!! 中止(硬失败): {e}")
+    finally:
+        if display is not None:
+            display.close()   # 收显示线程(退出时 Tcl abort 属已知噪声, 同 TRT, 无损)
 
 
 if __name__ == "__main__":
