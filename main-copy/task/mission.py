@@ -60,21 +60,56 @@ def run_action(lk, group, outer, car, timeout=None, gated=False):
     return False
 
 
-def arm_move(lk, pose, label="臂", timeout=None):
-    """臂单步(0x0002 等 0x0012): 码放动作组前后的收/放臂辅助。"""
+def arm_move(lk, pose, label="臂", timeout=None, grip=None):
+    """臂单步(0x0002 等 0x0012): 码放动作组前后的收/放臂辅助。
+    grip=(角度0.1°, ms) 非 None 时夹爪帧与臂帧背靠背同发(2026-11-06 用户定:
+    视觉/纠偏前张爪与伸臂一起执行), 0x0012+0x0013 两回执都到才返回;
+    超时缺哪个告警哪个(继续, 保完赛)。返回臂是否到位。"""
     timeout = C.CMD_TIMEOUT if timeout is None else timeout
     tx = frame(Mode.MOVE_A, *pose)
-    print(f"  TX 臂 {label} {tuple(pose)} hex={tx.hex(' ').upper()}")
     lk.flush()
+    if grip is not None:
+        gtx = frame(Mode.GRIPPER, *grip)
+        print(f"  TX 夹爪 {grip[0] / 10:.1f}°(与臂同发) hex={gtx.hex(' ').upper()}")
+        lk.ser.write(gtx)
+    print(f"  TX 臂 {label} {tuple(pose)} hex={tx.hex(' ').upper()}")
     lk.ser.write(tx)
+    t0 = time.time()
+    arm_ok, grip_ok = False, grip is None
+    while time.time() - t0 < timeout:
+        for f in lk.poll():
+            if f.mode == Mode.ACK_ARM and not arm_ok:
+                arm_ok = True
+                print(f"  ✓ 臂到位 ({time.time()-t0:.1f}s)")
+            elif f.mode == Mode.ACK_GRIPPER and not grip_ok:
+                grip_ok = True
+                print(f"  ✓ 夹爪到位 ({time.time()-t0:.1f}s)")
+        if arm_ok and grip_ok:
+            return True
+        time.sleep(0.03)
+    if not arm_ok:
+        print(f"  !! {timeout:.0f}s 无 0x0012 臂回执(继续)")
+    if not grip_ok:
+        print(f"  !! {timeout:.0f}s 无 0x0013 夹爪回执(继续)")
+    return arm_ok
+
+
+def grip_vision(lk, timeout=None):
+    """单发张爪到视觉开度 GRIP_VISION(等 0x0013): 无伸臂可搭时用(守株抓料
+    每抓完一颗——成套动作会动爪——下一色识别前重张)。返回是否到位。"""
+    timeout = C.CMD_TIMEOUT if timeout is None else timeout
+    gtx = frame(Mode.GRIPPER, *C.GRIP_VISION)
+    print(f"  TX 夹爪 {C.GRIP_VISION[0] / 10:.1f}°(视觉开度) hex={gtx.hex(' ').upper()}")
+    lk.flush()
+    lk.ser.write(gtx)
     t0 = time.time()
     while time.time() - t0 < timeout:
         for f in lk.poll():
-            if f.mode == Mode.ACK_ARM:
-                print(f"  ✓ 臂到位 ({time.time()-t0:.1f}s)")
+            if f.mode == Mode.ACK_GRIPPER:
+                print(f"  ✓ 夹爪到位 ({time.time()-t0:.1f}s)")
                 return True
         time.sleep(0.03)
-    print(f"  !! {timeout:.0f}s 无 0x0012 臂回执(继续)")
+    print(f"  !! {timeout:.0f}s 无 0x0013 夹爪回执(继续)")
     return False
 
 
@@ -492,12 +527,16 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
     返回 (ok, total)。"""
     from vision import finder
     print(f"\n===== {batch} 抓料 (守株: 按任务码顺序逐色等待) =====")
-    arm_move(lk, C.RESET, "缩回复位(定一纠偏位)")
+    arm_move(lk, C.RESET, "缩回复位(定一纠偏位)", grip=C.GRIP_VISION)   # 张爪900与臂同发
     c_first = align_material_turntable(lk, cam, backend, wait)   # 三态; 接住纠偏料
     if c_first is not None and c_first.color == colors[0]:
         _wait_aligned_leave(cam, backend, c_first)
     ok = 0
+    reopen = False   # 成套动作会动爪: 抓过一颗后下一色识别前重张到视觉开度
     for i, color in enumerate(colors, 1):
+        if reopen:
+            grip_vision(lk)
+            reopen = False
         print(f"\n<等 {color}(第{i}个抓): 转进窗+停歇即发 MODE5, ≤{wait:.0f}s>")
         mat, _fr = finder.wait_for_color(backend, cam, color,
                                          px_per_mm=C.PX_PER_MM,
@@ -510,6 +549,7 @@ def grab_materials(lk, cam, backend, colors, wait, batch="批1"):
               f"前{c*mat.dx+d*mat.dy:+.1f}mm) → 组2 抓取上盘格{i}")
         if run_action(lk, 2, 2, i, C.ACTION_TIMEOUT):
             ok += 1
+        reopen = True
     print(f"\n== {batch} 抓料完成 ({ok}/{len(colors)}, 车在锚点位) ==")
     return ok, len(colors)
 
@@ -521,7 +561,7 @@ def place_rings(lk, cam, backend, rings, timeout, mode="rough", colors=None):
     from vision import finder
     print(f"\n===== 放环 ({'粗加工区' if mode == 'rough' else '暂存区'}) =====")
     arm_move(lk, C.RESET, "回复位")
-    arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
+    arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)", grip=C.GRIP_VISION)   # 伸臂+张爪900同发
     # 找环+纠偏一体(2026-11-06 用户定 取消放弃): 2号在视野即纠偏; 修正走完丢2号
     # → on_miss 找回循环(无环x-10/有环无2号y±80)重找, 预算内绝不放弃,
     # 耗尽才带误差继续(保完赛); 原独立 seek 段并入 on_miss(开局找环同规则)
@@ -581,7 +621,7 @@ def stack_rings(lk, cam, backend, task, timeout, use_vision=True, gated=False):
     jobs = []                        # (位Y, 盘格Z, 颜色)
     if use_vision:
         arm_move(lk, C.RESET, "抬臂至标定高度(码垛纠偏前, RESET Y=1810=标定高度, 2026-11-03 用户改)")
-        arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
+        arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)", grip=C.GRIP_VISION)   # 伸臂+张爪900同发
         matrix = C.IMG2BODY_STACK if C.IMG2BODY_STACK is not None else C.IMG2BODY_RING
         if C.IMG2BODY_STACK is None:
             print("  ⚠ IMG2BODY_STACK 未标定: 回退圆环矩阵 IMG2BODY_RING"

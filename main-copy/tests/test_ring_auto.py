@@ -77,7 +77,7 @@ def main():
 
     print("== 臂到位(main.py 同款): RESET → RING_ALIGN ==")
     M.arm_move(lk, C.RESET, "回复位")
-    M.arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)")
+    M.arm_move(lk, C.RING_ALIGN, "圆环纠偏位(前伸32mm)", grip=C.GRIP_VISION)   # 同 place_rings
 
     print("\n⚠ 自动动车模式: 回车后判环+纠偏期间车会自己动, 保证车前区域安全")
     print("回车=跑一轮(判环找中环→自动纠偏 2 号环); q 退出")
